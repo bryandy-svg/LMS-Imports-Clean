@@ -1,4 +1,0 @@
-{
-  "buildCommand": "mkdir -p dist && cp -R supabase-app/* dist/",
-  "outputDirectory": "dist"
-}
