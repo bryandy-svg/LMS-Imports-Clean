@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mall Lot Inventory Request</title>
+  <style>
+    :root {
+      --bg: #f5f7f4;
+      --panel: #fff;
+      --ink: #172018;
+      --muted: #637064;
+      --line: #d7ded7;
+      --green: #2d7657;
+      --blue: #245dbb;
+      --danger: #b42318;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, sans-serif;
+      font-size: 15px;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding: 14px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { margin: 0; font-size: 20px; }
+    main {
+      display: grid;
+      gap: 12px;
+      padding: 12px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    label {
+      display: grid;
+      gap: 5px;
+      color: #59665a;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    input, select, textarea, button {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+      font: inherit;
+      background: #fff;
+      color: var(--ink);
+    }
+    button {
+      border-color: #cfd8d0;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    button.primary {
+      background: var(--green);
+      border-color: var(--green);
+      color: #fff;
+    }
+    button.danger {
+      color: var(--danger);
+      border-color: #f0beb8;
+    }
+    .grid { display: grid; gap: 10px; }
+    .row {
+      display: grid;
+      grid-template-columns: 76px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .row img, .placeholder {
+      width: 76px;
+      height: 76px;
+      object-fit: cover;
+      border-radius: 7px;
+      border: 1px solid var(--line);
+      background: #edf2ed;
+    }
+    .placeholder {
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-weight: 800;
+    }
+    .row strong { display: block; margin-bottom: 3px; }
+    .muted { color: var(--muted); font-size: 12px; text-transform: none; font-weight: 400; }
+    .selected-item {
+      grid-template-columns: 64px 1fr 84px 36px;
+    }
+    .selected-item img, .selected-item .placeholder {
+      width: 64px;
+      height: 64px;
+    }
+    .qty {
+      min-width: 0;
+    }
+    .icon {
+      padding: 0;
+      min-height: 36px;
+    }
+    .results {
+      display: grid;
+      gap: 8px;
+      max-height: 420px;
+      overflow: auto;
+    }
+    .signature {
+      width: 100%;
+      height: 180px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      touch-action: none;
+    }
+    .actions {
+      position: sticky;
+      bottom: 0;
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      margin: 0 -12px -12px;
+    }
+    .status {
+      padding: 9px;
+      border-radius: 7px;
+      background: #eef5ef;
+      color: #24513c;
+    }
+    .status.error {
+      background: #fff0ee;
+      color: var(--danger);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Mall Lot Inventory Request</h1>
+    <div class="muted" id="status">Loading inventory...</div>
+  </header>
+  <main>
+    <section class="grid">
+      <label>Search Item
+        <input id="search" inputmode="search" autocomplete="off" placeholder="Type orange, HDPE, SKU, barcode">
+      </label>
+      <div class="results" id="results"></div>
+    </section>
+
+    <section class="grid">
+      <label>Selected Items</label>
+      <div class="grid" id="selected"></div>
+    </section>
+
+    <section class="grid">
+      <label>Type
+        <select id="requestType">
+          <option>Borrowed</option>
+          <option>Issued Permanently</option>
+        </select>
+      </label>
+      <label>Date Borrowed / Issued<input id="requestDate" type="date" required></label>
+      <label>Jobsite<input id="jobsite" placeholder="Jobsite or project"></label>
+      <label>Requested By<input id="requestedBy" required placeholder="Requester name"></label>
+      <label>Approved By<input id="approvedBy" placeholder="Approver name"></label>
+      <label>Name<input id="signatureName" placeholder="Printed signer name"></label>
+      <label>Return Date<input id="returnDate" type="date"></label>
+      <label>PO #<input id="poNumber" placeholder="PO number"></label>
+      <label>Company<input id="company" placeholder="Company name"></label>
+      <label>Request Photo<input id="requestPhoto" type="file" accept="image/*" capture="environment"></label>
+      <label>Notes<textarea id="notes" placeholder="Optional details"></textarea></label>
+    </section>
+
+    <section class="grid">
+      <label>Actual Signature</label>
+      <canvas class="signature" id="signature"></canvas>
+      <button type="button" id="clearSignature">Clear Signature</button>
+    </section>
+
+    <section class="actions">
+      <button class="primary" id="submitRequest">Submit Request</button>
+      <button id="reloadItems">Reload Inventory</button>
+      <div class="status" id="message">Choose one or more items first.</div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+    const supabaseUrl = "https://laufwbeinkvlwdhroeaj.supabase.co";
+    const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxhdWZ3YmVpbmt2bHdkaHJvZWFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0MjE0NTksImV4cCI6MjA5NDk5NzQ1OX0.Jm3ivkmxnak2j9uX1n9b1e0cVuT5QlH2U8CLHoZWKqg";
+    const itemTable = "inventory_items";
+    const requestTable = "inventory_requests";
+    const client = createClient(supabaseUrl, supabaseKey);
+    const $ = id => document.getElementById(id);
+    let items = [];
+    let selected = [];
+    let photoData = "";
+    let signatureData = "";
+
+    $("requestDate").value = new Date().toISOString().slice(0, 10);
+
+    function escapeHtml(value = "") {
+      return String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
+    }
+
+    function itemText(item) {
+      return [item.name, item.sku, item.barcode, item.category, item.location, item.bin, item.supplier, item.tags, stockSummary(item)].filter(Boolean).join(" ").toLowerCase();
+    }
+
+    function stockRows(item) {
+      return Array.isArray(item.stockLocations) && item.stockLocations.length
+        ? item.stockLocations
+        : [{ id: "", location: item.location || "", bin: item.bin || "", quantity: Number(item.quantity || 0) }];
+    }
+
+    function stockSummary(item) {
+      return stockRows(item).map(row => `${row.location || "No location"} ${row.bin || ""} ${Number(row.quantity || 0)} ${item.unit || ""}`).join(", ");
+    }
+
+    function photoHtml(item) {
+      return item.photoData
+        ? `<img src="${item.photoData}" alt="${escapeHtml(item.name)} photo">`
+        : `<div class="placeholder">IMG</div>`;
+    }
+
+    function setMessage(text, error = false) {
+      $("message").textContent = text;
+      $("message").classList.toggle("error", error);
+    }
+
+    async function loadItems() {
+      $("status").textContent = "Loading inventory from Supabase...";
+      const { data, error } = await client.from(itemTable).select("payload").order("name", { ascending: true });
+      if (error) {
+        $("status").textContent = "Could not load inventory.";
+        setMessage(error.message, true);
+        return;
+      }
+      items = (data || []).map(row => row.payload).filter(Boolean);
+      $("status").textContent = `${items.length} items loaded.`;
+      renderResults();
+    }
+
+    function matches() {
+      const query = $("search").value.trim().toLowerCase();
+      const terms = query.split(/\s+/).filter(Boolean);
+      const source = terms.length ? items.filter(item => terms.every(term => itemText(item).includes(term))) : items;
+      return source.slice(0, 30);
+    }
+
+    function renderResults() {
+      const rows = matches();
+      $("results").innerHTML = rows.map(item => `
+        <button type="button" class="row" data-add="${escapeHtml(item.id)}">
+          ${photoHtml(item)}
+          <span>
+            <strong>${escapeHtml(item.name || "Unnamed item")}</strong>
+            <span class="muted">${escapeHtml([item.sku, item.category, stockSummary(item)].filter(Boolean).join(" | "))}</span>
+          </span>
+        </button>
+      `).join("") || `<div class="row"><div class="placeholder">IMG</div><span><strong>No matching item</strong><span class="muted">Try another word like orange, HDPE, SKU, or location.</span></span></div>`;
+    }
+
+    function renderSelected() {
+      $("selected").innerHTML = selected.map((line, index) => `
+        <div class="row selected-item">
+          ${photoHtml(line.item)}
+          <span>
+            <strong>${escapeHtml(line.item.name || "Unnamed item")}</strong>
+            <span class="muted">${escapeHtml(line.item.unit || "unit")} | ${escapeHtml(stockSummary(line.item))}</span>
+          </span>
+          <input class="qty" type="number" min="1" step="1" value="${Number(line.quantity || 1)}" data-qty="${index}">
+          <button class="icon danger" type="button" data-remove="${index}">-</button>
+        </div>
+      `).join("") || `<div class="muted">No items selected yet.</div>`;
+    }
+
+    function addItem(id) {
+      const item = items.find(record => record.id === id);
+      if (!item) return;
+      const existing = selected.find(line => line.item.id === id);
+      if (existing) existing.quantity += 1;
+      else selected.push({ item, quantity: 1 });
+      renderSelected();
+      setMessage(`${item.name} added.`);
+    }
+
+    $("results").addEventListener("click", event => {
+      const button = event.target.closest("[data-add]");
+      if (button) addItem(button.dataset.add);
+    });
+
+    $("selected").addEventListener("input", event => {
+      if (!event.target.matches("[data-qty]")) return;
+      selected[Number(event.target.dataset.qty)].quantity = Math.max(1, Number(event.target.value || 1));
+    });
+
+    $("selected").addEventListener("click", event => {
+      const button = event.target.closest("[data-remove]");
+      if (!button) return;
+      selected.splice(Number(button.dataset.remove), 1);
+      renderSelected();
+    });
+
+    $("search").addEventListener("input", renderResults);
+    $("reloadItems").addEventListener("click", loadItems);
+    $("requestType").addEventListener("change", () => {
+      $("returnDate").required = $("requestType").value === "Borrowed";
+    });
+    $("returnDate").required = true;
+
+    $("requestPhoto").addEventListener("change", event => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const image = new Image();
+        image.onload = () => {
+          const maxSide = 900;
+          const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(image.width * scale));
+          canvas.height = Math.max(1, Math.round(image.height * scale));
+          canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+          photoData = canvas.toDataURL("image/jpeg", 0.72);
+        };
+        image.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    function setupSignature() {
+      const canvas = $("signature");
+      const ctx = canvas.getContext("2d");
+      let drawing = false;
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = Math.max(1, Math.round(rect.width * devicePixelRatio));
+        canvas.height = Math.max(1, Math.round(rect.height * devicePixelRatio));
+        ctx.scale(devicePixelRatio, devicePixelRatio);
+        ctx.lineWidth = 2;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "#172018";
+      }
+      function point(event) {
+        const touch = event.touches?.[0] || event;
+        const rect = canvas.getBoundingClientRect();
+        return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+      }
+      function start(event) {
+        event.preventDefault();
+        drawing = true;
+        const p = point(event);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+      }
+      function draw(event) {
+        if (!drawing) return;
+        event.preventDefault();
+        const p = point(event);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        signatureData = canvas.toDataURL("image/png");
+      }
+      function stop() {
+        drawing = false;
+        signatureData = canvas.toDataURL("image/png");
+      }
+      resize();
+      addEventListener("resize", resize);
+      canvas.addEventListener("mousedown", start);
+      canvas.addEventListener("mousemove", draw);
+      canvas.addEventListener("mouseup", stop);
+      canvas.addEventListener("mouseleave", stop);
+      canvas.addEventListener("touchstart", start, { passive: false });
+      canvas.addEventListener("touchmove", draw, { passive: false });
+      canvas.addEventListener("touchend", stop);
+      $("clearSignature").addEventListener("click", () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        signatureData = "";
+      });
+    }
+
+    async function submitRequest() {
+      if (!selected.length) {
+        setMessage("Choose at least one item.", true);
+        return;
+      }
+      if (!$("requestedBy").value.trim()) {
+        setMessage("Requested By is required.", true);
+        return;
+      }
+      if ($("requestType").value === "Borrowed" && !$("returnDate").value) {
+        setMessage("Return Date is required for borrowed items.", true);
+        return;
+      }
+      const first = selected[0];
+      const request = {
+        id: crypto.randomUUID(),
+        requestType: $("requestType").value,
+        requestDate: $("requestDate").value,
+        jobsite: $("jobsite").value.trim(),
+        requestedBy: $("requestedBy").value.trim(),
+        approvedBy: $("approvedBy").value.trim(),
+        signatureName: $("signatureName").value.trim(),
+        signatureData,
+        photoData,
+        returnDate: $("returnDate").value,
+        poNumber: $("poNumber").value.trim(),
+        company: $("company").value.trim(),
+        notes: $("notes").value.trim(),
+        status: "Pending",
+        itemId: first.item.id,
+        itemName: first.item.name,
+        sku: first.item.sku || "",
+        quantity: Number(first.quantity || 1),
+        unit: first.item.unit || "",
+        items: selected.map(line => ({
+          itemId: line.item.id,
+          itemName: line.item.name,
+          sku: line.item.sku || "",
+          quantity: Number(line.quantity || 1),
+          unit: line.item.unit || "",
+          locationId: stockRows(line.item)[0]?.id || "",
+          locationName: stockSummary(line.item)
+        })),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      const record = {
+        id: request.id,
+        item_id: request.itemId,
+        request_type: request.requestType,
+        item_name: request.itemName,
+        sku: request.sku,
+        requested_by: request.requestedBy,
+        jobsite: request.jobsite,
+        approved_by: request.approvedBy,
+        signature_name: request.signatureName,
+        signature_data: request.signatureData,
+        photo_data: request.photoData,
+        return_date: request.returnDate || null,
+        issue_po_number: request.poNumber,
+        quantity: request.quantity,
+        unit: request.unit,
+        company: request.company,
+        status: request.status,
+        items: request.items,
+        payload: request,
+        updated_at: request.updatedAt
+      };
+      setMessage("Submitting request...");
+      const { error } = await client.from(requestTable).upsert(record, { onConflict: "id" });
+      if (error) {
+        setMessage(error.message, true);
+        return;
+      }
+      selected = [];
+      renderSelected();
+      setMessage("Request submitted. Thank you.");
+      document.querySelectorAll("input:not(#search), textarea").forEach(input => input.value = "");
+      $("requestDate").value = new Date().toISOString().slice(0, 10);
+      photoData = "";
+      signatureData = "";
+      $("clearSignature").click();
+    }
+
+    $("submitRequest").addEventListener("click", submitRequest);
+    setupSignature();
+    renderSelected();
+    loadItems();
+  </script>
+</body>
+</html>
