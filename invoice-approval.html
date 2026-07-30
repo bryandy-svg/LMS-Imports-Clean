@@ -1,0 +1,71 @@
+import { createClient } from "npm:@supabase/supabase-js@2.57.4";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Content-Type": "application/json"
+};
+
+const allowedAccess = new Set([
+  "dashboard", "inventory", "issued", "borrowed", "requests",
+  "greenwaste", "alerts", "settings", "manage_users"
+]);
+const bootstrapAdmin = "bryan.dy@lmsfm.com";
+
+Deno.serve(async (request) => {
+  if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const authorization = request.headers.get("Authorization") || "";
+    const token = authorization.replace(/^Bearer\s+/i, "");
+    if (!token) throw new Error("Authentication required.");
+
+    const url = Deno.env.get("SUPABASE_URL")!;
+    const publishableKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const callerClient = createClient(url, publishableKey);
+    const { data: callerData, error: callerError } = await callerClient.auth.getUser(token);
+    if (callerError || !callerData.user) throw new Error("Invalid login session.");
+
+    const caller = callerData.user;
+    const callerAccess = Array.isArray(caller.app_metadata?.access) ? caller.app_metadata.access : [];
+    const isBootstrapAdmin = String(caller.email || "").toLowerCase() === bootstrapAdmin;
+    if (!isBootstrapAdmin && !callerAccess.includes("manage_users")) {
+      return new Response(JSON.stringify({ error: "User-management access is required." }), { status: 403, headers: corsHeaders });
+    }
+
+    const body = await request.json();
+    if (body.action !== "create") throw new Error("Unsupported action.");
+    const username = String(body.username || "").trim().toLowerCase();
+    const password = String(body.password || "");
+    const access = [...new Set(Array.isArray(body.access) ? body.access : [])].filter(value => allowedAccess.has(value));
+    if (!username || !username.includes("@")) throw new Error("Enter a valid username.");
+    if (password.length < 8) throw new Error("Password must contain at least 8 characters.");
+    if (!access.length) throw new Error("Select at least one access checkbox.");
+
+    const adminClient = createClient(url, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+    const { data, error } = await adminClient.auth.admin.createUser({
+      email: username,
+      password,
+      email_confirm: true,
+      app_metadata: { access, created_by: caller.id },
+      user_metadata: { username }
+    });
+    if (error) throw error;
+    const { error: accessError } = await adminClient.from("user_access").upsert({
+      user_id: data.user.id,
+      username,
+      access,
+      created_by: caller.id,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "user_id" });
+    if (accessError) throw new Error(`User was created, but access storage failed: ${accessError.message}`);
+    return new Response(JSON.stringify({ id: data.user.id, username }), { headers: corsHeaders });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
+      status: 400,
+      headers: corsHeaders
+    });
+  }
+});
