@@ -1,8 +1,0 @@
-{
-  "cleanUrls": true,
-  "rewrites": [
-    { "source": "/request", "destination": "/request.html" },
-    { "source": "/mobile", "destination": "/request.html" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
-}
