@@ -1407,7 +1407,7 @@
             <small class="muted">Click or drag photo here.</small>
           </label>
           <label class="span-2">Item Name<input id="name" required placeholder="Nitrile gloves, 4 mil"></label>
-          <label>SKU<input id="sku" placeholder="SKU-001"></label>
+          <label>SKU<input id="sku" list="inventoryItemSkuOptions" autocomplete="off" placeholder="Search SKU or item"></label>
           <label>Barcode<input id="barcode" placeholder="UPC or internal code"></label>
           <label>Category<input id="category" placeholder="Medical, Cleaning, Parts"></label>
           <input id="quantity" type="hidden">
@@ -1424,7 +1424,7 @@
             <button type="button" id="addStockLocationBtn">Add Location</button>
             <small class="muted">Use this when the same part is stored in more than one place. Total quantity updates from the rows below.</small>
           </div>
-          <label>Supplier<input id="supplier" placeholder="Supplier name"></label>
+          <label>Supplier<input id="supplier" list="inventorySupplierOptions" autocomplete="off" placeholder="Search supplier"></label>
           <label>Supplier Contact<input id="supplierContact" placeholder="email or phone"></label>
           <label>PO Number<input id="poNumber" placeholder="PO-2026-001"></label>
           <label>From<input id="sourceFrom" placeholder="Vendor, donor, department, site"></label>
@@ -1464,6 +1464,8 @@
       </div>
     </form>
   </div>
+  <datalist id="inventoryItemSkuOptions"></datalist>
+  <datalist id="inventorySupplierOptions"></datalist>
 
   <div class="modal-backdrop" id="requestModal">
     <form class="modal" id="requestForm">
@@ -3478,8 +3480,22 @@
       $("supplierList").innerHTML = Object.entries(suppliers).map(([name, data]) => `<div class="supplier-item"><div class="item-title"><span>${escapeHtml(name)}</span><span>${formatMoney(data.value)}</span></div><div class="muted">${data.count} items · ${data.low} need reorder · ${escapeHtml(data.contact)}</div></div>`).join("");
     }
 
+    function renderInventoryFormLookups() {
+      const skuItems = [...state.items]
+        .filter(item => String(item.sku || "").trim())
+        .sort((a, b) => String(a.sku || "").localeCompare(String(b.sku || "")));
+      $("inventoryItemSkuOptions").innerHTML = skuItems.map(item => {
+        const detail = [item.name, item.unit, item.supplier].filter(Boolean).join(" · ");
+        return `<option value="${escapeHtml(item.sku)}">${escapeHtml(detail)}</option>`;
+      }).join("");
+      const suppliers = [...new Set(state.items.map(item => String(item.supplier || "").trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+      $("inventorySupplierOptions").innerHTML = suppliers.map(supplier => `<option value="${escapeHtml(supplier)}"></option>`).join("");
+    }
+
     function openItem(id, options = {}) {
       const item = state.items.find(i => i.id === id);
+      renderInventoryFormLookups();
       $("modalTitle").textContent = item ? "Edit Item" : "Add Item";
       $("itemId").value = item?.id || "";
       renderUnitOptions(item?.unit || "each");
@@ -5472,6 +5488,13 @@
     $("duplicateBtn").addEventListener("click", duplicateCurrent);
     $("adjustBtn").addEventListener("click", adjustCurrent);
     $("unit").addEventListener("change", updateIssuedUnitHint);
+    $("sku").addEventListener("change", event => {
+      const value = event.target.value.trim().toLowerCase();
+      if (!value) return;
+      const existing = state.items.find(item => String(item.sku || "").trim().toLowerCase() === value);
+      if (!existing || existing.id === $("itemId").value) return;
+      openItem(existing.id);
+    });
     $("addUnitBtn").addEventListener("click", quickCreateUnit);
     $("addStockLocationBtn").addEventListener("click", addStockLocation);
     $("stockLocationsList").addEventListener("input", updateQuantityFromStockLocations);

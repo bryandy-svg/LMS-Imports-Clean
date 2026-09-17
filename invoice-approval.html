@@ -39,9 +39,10 @@
     main {
       display: grid;
       gap: 14px;
-      padding: 16px;
-      max-width: 1280px;
-      margin: 0 auto;
+      width: 100%;
+      max-width: none;
+      padding: 12px 14px;
+      margin: 0;
     }
     .panel {
       background: var(--panel);
@@ -50,6 +51,7 @@
       padding: 14px;
     }
     .panel.review {
+      width: 100%;
       overflow-x: auto;
     }
     .toolbar {
@@ -161,6 +163,7 @@
     }
     @media (max-width: 920px) {
       header { align-items: flex-start; flex-direction: column; }
+      main { padding: 10px; }
       .row {
         grid-template-columns: 82px 1fr;
         min-width: 0;
@@ -231,6 +234,8 @@
       <div class="review" id="rows"></div>
     </section>
   </main>
+  <datalist id="inventorySkuOptions"></datalist>
+  <datalist id="inventoryVendorOptions"></datalist>
 
   <script type="module">
     import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -305,10 +310,32 @@
       const { data, error } = await client.from(itemTable).select("payload");
       if (error) throw error;
       items = (data || []).map(row => row.payload).filter(Boolean);
+      renderLookupOptions();
+    }
+
+    function renderLookupOptions() {
+      const skuItems = [...items]
+        .filter(item => String(item.sku || "").trim())
+        .sort((a, b) => String(a.sku || "").localeCompare(String(b.sku || "")));
+      $("inventorySkuOptions").innerHTML = skuItems.map(item => {
+        const detail = [item.name, item.unit, item.supplier].filter(Boolean).join(" · ");
+        return `<option value="${escapeHtml(item.sku)}">${escapeHtml(detail)}</option>`;
+      }).join("");
+      const vendors = [...new Set([
+        ...items.map(item => String(item.supplier || "").trim()),
+        ...drafts.flatMap(draft => (draft.rows || []).map(row => String(row.vendor || "").trim())),
+        ...rows.map(row => String(row.vendor || "").trim())
+      ].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      $("inventoryVendorOptions").innerHTML = vendors.map(vendor => `<option value="${escapeHtml(vendor)}"></option>`).join("");
     }
 
     async function loadDrafts() {
       setStatus("Loading pending invoice uploads...");
+      try {
+        await loadItems();
+      } catch (error) {
+        console.warn("Inventory lookup could not be loaded.", error);
+      }
       const { data, error } = await client.from(requestTable).select("payload").order("updated_at", { ascending: false });
       if (error) {
         setStatus(error.message, true);
@@ -319,6 +346,7 @@
         .map(row => row.payload)
         .filter(payload => payload?.recordType === "invoice_import")
         .filter(payload => statusFilter === "All" || (payload.status || "Pending") === statusFilter);
+      renderLookupOptions();
       if (!drafts.length) {
         $("draftSelect").innerHTML = `<option value="">No pending uploads</option>`;
         $("cancelUploadBtn").disabled = true;
@@ -370,11 +398,11 @@
             <textarea class="name-cell" data-name placeholder="Item name">${escapeHtml(row.name || "")}</textarea>
             ${duplicateKeys.has(rowMatchKey(row)) ? `<div class="duplicate-note">Duplicate ${row.sku ? "SKU" : "item name"} in this PDF. Quantity will be added to the same inventory item.</div>` : ""}
           </div>
-          <input class="sku-cell" data-sku value="${escapeHtml(row.sku || "")}" placeholder="SKU">
+          <input class="sku-cell" data-sku list="inventorySkuOptions" autocomplete="off" value="${escapeHtml(row.sku || "")}" placeholder="Search SKU or item">
           <input class="qty-cell" data-qty type="number" min="0" step="1" value="${Number(row.quantity || 1)}">
           <input class="unit-cell" data-unit value="${escapeHtml(row.unit || "each")}">
           <input class="cost-cell" data-cost type="number" min="0" step="0.01" value="${Number(row.unitCost || 0)}">
-          <input class="vendor-cell" data-vendor value="${escapeHtml(row.vendor || "")}" placeholder="Vendor">
+          <input class="vendor-cell" data-vendor list="inventoryVendorOptions" autocomplete="off" value="${escapeHtml(row.vendor || "")}" placeholder="Search vendor">
           <input class="invoice-cell" data-invoice value="${escapeHtml(row.invoiceNumber || row.invoiceNo || "")}" placeholder="Invoice #">
           <input class="location-cell" data-location value="${escapeHtml(row.location || "Mall Lot")}">
           <input class="bin-cell" data-bin value="${escapeHtml(row.bin || "")}">
@@ -630,6 +658,29 @@
     $("saveDraftBtn").addEventListener("click", () => saveDraft());
     $("cancelUploadBtn").addEventListener("click", cancelUpload);
     $("approveBtn").addEventListener("click", approveRows);
+    $("rows").addEventListener("change", event => {
+      const input = event.target.closest("[data-sku]");
+      if (!input) return;
+      const rowElement = input.closest("[data-row]");
+      const index = Number(rowElement?.dataset.row);
+      const selected = items.find(item => String(item.sku || "").trim().toLowerCase() === input.value.trim().toLowerCase());
+      if (!selected || !Number.isInteger(index)) return;
+      rows = collectRows();
+      rows[index] = {
+        ...rows[index],
+        sku: selected.sku || rows[index].sku,
+        name: selected.name || rows[index].name,
+        unit: selected.unit || rows[index].unit || "each",
+        unitCost: Number(selected.unitCost ?? rows[index].unitCost ?? 0),
+        vendor: selected.supplier || rows[index].vendor || "",
+        location: selected.location || rows[index].location || "Mall Lot",
+        bin: selected.bin || rows[index].bin || "",
+        photoData: rows[index].photoData || selected.photoData || ""
+      };
+      renderLookupOptions();
+      renderRows();
+      setStatus(`Existing inventory item ${selected.sku} selected and its details were filled in.`);
+    });
     $("rows").addEventListener("change", event => {
       const input = event.target.closest("[data-photo], [data-camera-input]");
       if (!input?.files?.[0]) return;
