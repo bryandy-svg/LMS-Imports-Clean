@@ -1071,7 +1071,7 @@
           <button id="invoicePdfBtn" title="Scan invoice PDF into draft inventory rows">Invoice PDF</button>
           <button id="invoiceApprovalsBtn" title="Open saved PDF invoice drafts">PDF Approvals</button>
           <button id="addRequestBtn">Request</button>
-          <button id="topRequestReportBtn">Reports</button>
+          <button id="topPartsReportBtn">Reports</button>
           <button class="primary" id="addItemBtn">Add Item</button>
         </div>
       </header>
@@ -1585,6 +1585,27 @@
         <div class="muted" id="requestReportSummary"></div>
         <div class="table-wrap"><table class="ticket-table"><thead id="requestReportHead"></thead><tbody id="requestReportRows"></tbody></table></div>
         <div class="modal-actions"><button type="button" id="requestReportCsvBtn">Excel / CSV</button><button class="primary" type="button" id="requestReportPdfBtn">Report PDF</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="partsReportModal">
+    <div class="modal">
+      <div class="modal-head"><h2>Parts Performance Report</h2><button type="button" class="icon-btn" id="closePartsReportBtn">X</button></div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <label class="span-2">Report Type<select id="partsReportFormat"><option value="inventory">Inventory Value &amp; Stock Status</option><option value="velocity">Fast / Slow / No Movement</option><option value="movement">Stock Movement Detail</option><option value="category">Summary by Category</option><option value="supplier">Summary by Supplier</option><option value="location">Summary by Location</option></select></label>
+          <label>From Date<input id="partsReportFrom" type="date"></label>
+          <label>To Date<input id="partsReportTo" type="date"></label>
+          <label>Category<select id="partsReportCategory"></select></label>
+          <label>Supplier<select id="partsReportSupplier"></select></label>
+          <label>Location<select id="partsReportLocation"></select></label>
+          <label>Status<select id="partsReportStatus"></select></label>
+          <label class="span-2">Part # / Description<input id="partsReportSearch" placeholder="Search SKU, item, barcode, supplier"></label>
+        </div>
+        <div class="muted" id="partsReportSummary"></div>
+        <div class="table-wrap"><table class="ticket-table"><thead id="partsReportHead"></thead><tbody id="partsReportRows"></tbody></table></div>
+        <div class="modal-actions"><button type="button" id="partsReportCsvBtn">Excel / CSV</button><button class="primary" type="button" id="partsReportPdfBtn">Report PDF</button></div>
       </div>
     </div>
   </div>
@@ -3370,6 +3391,159 @@
       if (!popup) return alert("Allow pop-ups to create the Requests report PDF.");
       const tableRows = view.rows.map(row => `<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`).join("");
       popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:letter landscape;margin:.35in}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #333;padding:6px;font-size:9px}th{background:#e9f0eb;text-align:left}.total{font-weight:bold;text-align:right}</style></head><body><h1>LMS ${escapeHtml(view.title).toUpperCase()}</h1><div class="meta">Prepared ${escapeHtml(new Date().toLocaleString())} · ${rows.length} item lines · Total available cost ${formatMoney(total)}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),300));<\/script></body></html>`);
+      popup.document.close();
+    }
+
+    function partsReportFilters() {
+      const category = $("partsReportCategory")?.value || "";
+      const supplier = $("partsReportSupplier")?.value || "";
+      const location = $("partsReportLocation")?.value || "";
+      const status = $("partsReportStatus")?.value || "";
+      const search = $("partsReportSearch")?.value.trim().toLowerCase() || "";
+      return state.items.filter(item => (!category || item.category === category)
+        && (!supplier || item.supplier === supplier)
+        && (!location || normalizeStockLocations(item).some(row => row.location === location) || item.location === location)
+        && (!status || itemStatus(item).label === status)
+        && (!search || [item.sku, item.name, item.barcode, item.category, item.supplier, item.location, item.bin, item.tags].filter(Boolean).join(" ").toLowerCase().includes(search)));
+    }
+
+    function partsReportMovements(items = partsReportFilters()) {
+      const from = $("partsReportFrom")?.value || "";
+      const to = $("partsReportTo")?.value || "";
+      return items.flatMap(item => (item.movements || []).map(movement => ({ item, movement, date: String(movement.date || "").slice(0, 10) })))
+        .filter(row => (!from || row.date >= from) && (!to || row.date <= to))
+        .sort((a, b) => String(b.movement.date || "").localeCompare(String(a.movement.date || "")));
+    }
+
+    function partsReportGroup(items, field, fallback) {
+      const grouped = new Map();
+      items.forEach(item => {
+        const keys = field === "location"
+          ? [...new Set(normalizeStockLocations(item).map(row => row.location).filter(Boolean))]
+          : [item[field]];
+        (keys.length ? keys : [fallback]).forEach(keyValue => {
+          const key = keyValue || fallback;
+          const row = grouped.get(key) || { key, items: 0, quantity: 0, value: 0, low: 0, out: 0, missingCost: 0 };
+          row.items += 1;
+          row.quantity += Number(item.quantity || 0);
+          row.value += totalValue(item);
+          const label = itemStatus(item).label;
+          if (label === "Low") row.low += 1;
+          if (label === "Out") row.out += 1;
+          if (!(Number(item.unitCost || 0) > 0)) row.missingCost += 1;
+          grouped.set(key, row);
+        });
+      });
+      return [...grouped.values()].sort((a, b) => b.value - a.value || String(a.key).localeCompare(String(b.key)));
+    }
+
+    function partsReportView() {
+      const format = $("partsReportFormat")?.value || "inventory";
+      const items = partsReportFilters();
+      if (format === "movement") {
+        const movements = partsReportMovements(items);
+        return {
+          title: "Stock Movement Detail",
+          items,
+          sourceRows: movements,
+          headers: ["Date", "Part #", "Description", "Quantity", "Unit", "Reason", "Location", "Unit Cost", "Movement Value"],
+          rows: movements.map(({ item, movement }) => {
+            const amount = Number(movement.amount || 0);
+            const value = amount * Number(item.unitCost || 0);
+            return { csv: [movement.date, item.sku, item.name, amount, item.unit, movement.reason, movement.location, Number(item.unitCost || 0).toFixed(2), value.toFixed(2)], display: [movement.date ? new Date(movement.date).toLocaleDateString() : "", item.sku, item.name, amount > 0 ? `+${amount}` : amount, item.unit, movement.reason, movement.location, formatMoney(item.unitCost || 0), formatMoney(value)].map(value => escapeHtml(value)) };
+          })
+        };
+      }
+      if (format === "velocity") {
+        const datedMovements = partsReportMovements(items);
+        const movementMap = new Map();
+        datedMovements.forEach(({ item, movement }) => {
+          const value = movementMap.get(item.id) || { all: 0, outbound: 0, qtyOut: 0, last: "" };
+          value.all += 1;
+          if (Number(movement.amount || 0) < 0) { value.outbound += 1; value.qtyOut += Math.abs(Number(movement.amount || 0)); }
+          value.last = !value.last || String(movement.date || "") > value.last ? String(movement.date || "") : value.last;
+          movementMap.set(item.id, value);
+        });
+        const velocity = items.map(item => {
+          const movement = movementMap.get(item.id) || { all: 0, outbound: 0, qtyOut: 0, last: "" };
+          const classification = movement.outbound >= 4 ? "Fast Moving" : movement.all ? "Slow Moving" : "No Movement";
+          return { item, movement, classification };
+        }).sort((a, b) => a.classification.localeCompare(b.classification) || b.movement.outbound - a.movement.outbound || String(a.item.name).localeCompare(String(b.item.name)));
+        return {
+          title: "Fast, Slow & No-Movement Parts",
+          items,
+          sourceRows: velocity,
+          headers: ["Classification", "Part #", "Description", "Category", "Location", "On Hand", "Inventory Value", "Movements", "Outbound Runs", "Qty Out", "Last Movement"],
+          rows: velocity.map(({ item, movement, classification }) => ({ csv: [classification, item.sku, item.name, item.category, item.location, item.quantity, totalValue(item).toFixed(2), movement.all, movement.outbound, movement.qtyOut, movement.last], display: [classification, item.sku, item.name, item.category, item.location, Number(item.quantity || 0), formatMoney(totalValue(item)), movement.all, movement.outbound, movement.qtyOut, movement.last ? new Date(movement.last).toLocaleDateString() : "Never"].map(value => escapeHtml(value)) }))
+        };
+      }
+      if (["category", "supplier", "location"].includes(format)) {
+        const label = format === "category" ? "Category" : format === "supplier" ? "Supplier" : "Location";
+        const summary = partsReportGroup(items, format, `No ${label.toLowerCase()}`);
+        return {
+          title: `Parts Summary by ${label}`,
+          items,
+          sourceRows: summary,
+          headers: [label, "Items", "Quantity", "Inventory Value", "Low", "Out", "Without Cost"],
+          rows: summary.map(row => ({ csv: [row.key, row.items, row.quantity, row.value.toFixed(2), row.low, row.out, row.missingCost], display: [escapeHtml(row.key), row.items, row.quantity, formatMoney(row.value), row.low, row.out, row.missingCost] }))
+        };
+      }
+      return {
+        title: "Inventory Value & Stock Status",
+        items,
+        sourceRows: items,
+        headers: ["Part #", "Description", "Category", "Location", "Bin / Shelf", "Supplier", "On Hand", "Unit", "Reorder Point", "Unit Cost", "Inventory Value", "Status"],
+        rows: items.map(item => ({ csv: [item.sku, item.name, item.category, item.location, item.bin, item.supplier, item.quantity, item.unit, item.reorderPoint, Number(item.unitCost || 0).toFixed(2), totalValue(item).toFixed(2), itemStatus(item).label], display: [item.sku, item.name, item.category, item.location, item.bin, item.supplier, Number(item.quantity || 0), item.unit, Number(item.reorderPoint || 0), formatMoney(item.unitCost || 0), formatMoney(totalValue(item)), itemStatus(item).label].map(value => escapeHtml(value)) }))
+      };
+    }
+
+    function renderPartsReport() {
+      const view = partsReportView();
+      const items = view.items;
+      const quantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      const value = items.reduce((sum, item) => sum + totalValue(item), 0);
+      const missingCost = items.filter(item => !(Number(item.unitCost || 0) > 0)).length;
+      $("partsReportSummary").textContent = `${items.length} part${items.length === 1 ? "" : "s"} · ${quantity.toFixed(2)} total on hand · ${formatMoney(value)} inventory value${missingCost ? ` · ${missingCost} without cost` : ""} · ${view.sourceRows.length} report row${view.sourceRows.length === 1 ? "" : "s"}`;
+      $("partsReportHead").innerHTML = `<tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
+      $("partsReportRows").innerHTML = view.rows.map(row => `<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${view.headers.length}" class="empty">No parts match these report filters.</td></tr>`;
+    }
+
+    function populatePartsReportFilters() {
+      const options = (values, allLabel) => `<option value="">${allLabel}</option>${[...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b))).map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}`;
+      $("partsReportCategory").innerHTML = options(state.items.map(item => item.category), "All categories");
+      $("partsReportSupplier").innerHTML = options(state.items.map(item => item.supplier), "All suppliers");
+      $("partsReportLocation").innerHTML = options(state.items.flatMap(item => normalizeStockLocations(item).map(row => row.location).concat(item.location || [])), "All locations");
+      $("partsReportStatus").innerHTML = options(state.items.map(item => itemStatus(item).label), "All statuses");
+    }
+
+    function openPartsReport() {
+      populatePartsReportFilters();
+      if (!$("partsReportTo").value) $("partsReportTo").value = todayIso();
+      renderPartsReport();
+      $("partsReportModal").classList.add("open");
+      document.body.classList.add("modal-open");
+    }
+
+    function closePartsReport() {
+      $("partsReportModal").classList.remove("open");
+      document.body.classList.remove("modal-open");
+    }
+
+    function exportPartsReportCsv() {
+      const view = partsReportView();
+      if (!view.rows.length) return alert("No parts match the report filters.");
+      const data = [view.headers, ...view.rows.map(row => row.csv)];
+      download(`Parts-Report-${new Date().toISOString().slice(0,10)}.csv`, data.map(row => row.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8");
+    }
+
+    function printPartsReport() {
+      const view = partsReportView();
+      if (!view.rows.length) return alert("No parts match the report filters.");
+      const value = view.items.reduce((sum, item) => sum + totalValue(item), 0);
+      const popup = window.open("", "_blank", "width=1400,height=850");
+      if (!popup) return alert("Allow pop-ups to create the Parts report PDF.");
+      const tableRows = view.rows.map(row => `<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`).join("");
+      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:letter landscape;margin:.3in}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px;color:#1f684e}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse;table-layout:auto}th,td{border:1px solid #bac5bc;padding:5px;font-size:8.5px;vertical-align:top}th{background:#e9f0eb;text-align:left;text-transform:uppercase}tr{break-inside:avoid}td:nth-child(2){min-width:140px}</style></head><body><h1>LMS ${escapeHtml(view.title).toUpperCase()}</h1><div class="meta">Prepared ${escapeHtml(new Date().toLocaleString())} · ${view.items.length} parts · Inventory value ${formatMoney(value)}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),300));<\/script></body></html>`);
       popup.document.close();
     }
 
@@ -5392,11 +5566,15 @@
       await refreshRequestsRegister();
     }));
     $("requestReportBtn").addEventListener("click", openRequestReport);
-    $("topRequestReportBtn").addEventListener("click", openRequestReport);
+    $("topPartsReportBtn").addEventListener("click", openPartsReport);
     $("closeRequestReportBtn").addEventListener("click", closeRequestReport);
     $("requestReportCsvBtn").addEventListener("click", exportRequestReportCsv);
     $("requestReportPdfBtn").addEventListener("click", printRequestReport);
     ["requestReportFormat","requestReportFrom","requestReportTo","requestReportStatus","requestReportType","requestReportJobsite","requestReportCompany","requestReportItem"].forEach(id => $(id).addEventListener(id.includes("Format") || id.includes("Status") || id.includes("Type") || id.includes("From") || id.includes("To") ? "change" : "input", renderRequestReport));
+    $("closePartsReportBtn").addEventListener("click", closePartsReport);
+    $("partsReportCsvBtn").addEventListener("click", exportPartsReportCsv);
+    $("partsReportPdfBtn").addEventListener("click", printPartsReport);
+    ["partsReportFormat","partsReportFrom","partsReportTo","partsReportCategory","partsReportSupplier","partsReportLocation","partsReportStatus","partsReportSearch"].forEach(id => $(id).addEventListener(id === "partsReportSearch" ? "input" : "change", renderPartsReport));
     $("greenwasteForm").addEventListener("submit", saveGreenwasteTicket);
     $("parkGreenwasteTicketBtn").addEventListener("click", parkGreenwasteTicket);
     $("greenwasteCustomerForm").addEventListener("submit", saveGreenwasteCustomer);
