@@ -1048,6 +1048,7 @@
         <button class="sub" data-nav-filter="borrowed">Borrowed</button>
         <button data-view-button="requests">Requests</button>
         <button data-view-button="greenwaste">Piti Greenwaste Tickets</button>
+        <button id="sidebarPartsReportBtn">Parts Report</button>
         <button data-view-button="alerts">Alerts</button>
         <button data-view-button="settings">Settings</button>
         <button id="logoutBtn">Sign Out</button>
@@ -1071,7 +1072,7 @@
           <button id="invoicePdfBtn" title="Scan invoice PDF into draft inventory rows">Invoice PDF</button>
           <button id="invoiceApprovalsBtn" title="Open saved PDF invoice drafts">PDF Approvals</button>
           <button id="addRequestBtn">Request</button>
-          <button id="topPartsReportBtn">Reports</button>
+          <button id="topPartsReportBtn">Parts Report</button>
           <button class="primary" id="addItemBtn">Add Item</button>
         </div>
       </header>
@@ -5567,6 +5568,7 @@
     }));
     $("requestReportBtn").addEventListener("click", openRequestReport);
     $("topPartsReportBtn").addEventListener("click", openPartsReport);
+    $("sidebarPartsReportBtn").addEventListener("click", openPartsReport);
     $("closeRequestReportBtn").addEventListener("click", closeRequestReport);
     $("requestReportCsvBtn").addEventListener("click", exportRequestReportCsv);
     $("requestReportPdfBtn").addEventListener("click", printRequestReport);
