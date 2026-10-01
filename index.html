@@ -687,6 +687,18 @@
       display: block;
     }
 
+    #partsReportModal .ticket-table.photo-catalog-table {
+      min-width: 760px;
+      table-layout: fixed;
+    }
+    #partsReportModal .photo-catalog-table th,
+    #partsReportModal .photo-catalog-table td { white-space: normal; vertical-align: middle; }
+    #partsReportModal .photo-catalog-table th:nth-child(1) { width: 14%; }
+    #partsReportModal .photo-catalog-table th:nth-child(2) { width: 88px; }
+    #partsReportModal .photo-catalog-table th:nth-child(3) { width: 18%; }
+    #partsReportModal .photo-catalog-table th:nth-child(5) { width: 100px; }
+    #partsReportModal .photo-catalog-table th:nth-child(6) { width: 70px; }
+
     .photo-preview {
       width: 120px;
       height: 120px;
@@ -3535,6 +3547,7 @@
       const missingCost = items.filter(item => !(Number(item.unitCost || 0) > 0)).length;
       const photoSummary = view.format === "photo" ? ` · ${items.filter(item => item.photoData).length} with photos` : "";
       $("partsReportSummary").textContent = `${items.length} part${items.length === 1 ? "" : "s"} · ${quantity.toFixed(2)} total on hand · ${formatMoney(value)} inventory value${missingCost ? ` · ${missingCost} without cost` : ""}${photoSummary} · ${view.sourceRows.length} report row${view.sourceRows.length === 1 ? "" : "s"}`;
+      $("partsReportHead").closest("table").classList.toggle("photo-catalog-table", view.format === "photo");
       $("partsReportHead").innerHTML = `<tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
       $("partsReportRows").innerHTML = view.rows.map(row => `<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${view.headers.length}" class="empty">No parts match these report filters.</td></tr>`;
     }
