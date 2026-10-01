@@ -677,6 +677,16 @@
       font-size: 12px;
     }
 
+    .report-photo {
+      width: 72px;
+      height: 72px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #edf2ed;
+      object-fit: contain;
+      display: block;
+    }
+
     .photo-preview {
       width: 120px;
       height: 120px;
@@ -1595,7 +1605,7 @@
       <div class="modal-head"><h2>Parts Performance Report</h2><button type="button" class="icon-btn" id="closePartsReportBtn">X</button></div>
       <div class="modal-body">
         <div class="form-grid">
-          <label class="span-2">Report Type<select id="partsReportFormat"><option value="inventory">Inventory Value &amp; Stock Status</option><option value="velocity">Fast / Slow / No Movement</option><option value="movement">Stock Movement Detail</option><option value="category">Summary by Category</option><option value="supplier">Summary by Supplier</option><option value="location">Summary by Location</option></select></label>
+          <label class="span-2">Report Type<select id="partsReportFormat"><option value="inventory">Inventory Value &amp; Stock Status</option><option value="photo">Photo Catalog by Category</option><option value="velocity">Fast / Slow / No Movement</option><option value="movement">Stock Movement Detail</option><option value="category">Summary by Category</option><option value="supplier">Summary by Supplier</option><option value="location">Summary by Location</option></select></label>
           <label>From Date<input id="partsReportFrom" type="date"></label>
           <label>To Date<input id="partsReportTo" type="date"></label>
           <label>Category<select id="partsReportCategory"></select></label>
@@ -3441,6 +3451,25 @@
     function partsReportView() {
       const format = $("partsReportFormat")?.value || "inventory";
       const items = partsReportFilters();
+      if (format === "photo") {
+        const catalog = [...items].sort((a, b) => String(a.category || "Uncategorized").localeCompare(String(b.category || "Uncategorized")) || String(a.name || "").localeCompare(String(b.name || "")));
+        return {
+          title: "Parts Photo Catalog by Category",
+          format,
+          items,
+          sourceRows: catalog,
+          headers: ["Category", "Photo", "Part #", "Parts Description", "Qty On Hand", "Unit"],
+          rows: catalog.map(item => {
+            const photo = item.photoData
+              ? `<img class="report-photo" src="${escapeHtml(item.photoData)}" alt="${escapeHtml(item.name || "Part")} photo">`
+              : `<div class="report-photo photo-placeholder">NO PHOTO</div>`;
+            return {
+              csv: [item.category || "Uncategorized", item.photoData ? "Yes" : "No", item.sku, item.name, Number(item.quantity || 0), item.unit],
+              display: [escapeHtml(item.category || "Uncategorized"), photo, escapeHtml(item.sku || ""), escapeHtml(item.name || ""), escapeHtml(Number(item.quantity || 0)), escapeHtml(item.unit || "")]
+            };
+          })
+        };
+      }
       if (format === "movement") {
         const movements = partsReportMovements(items);
         return {
@@ -3504,7 +3533,8 @@
       const quantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
       const value = items.reduce((sum, item) => sum + totalValue(item), 0);
       const missingCost = items.filter(item => !(Number(item.unitCost || 0) > 0)).length;
-      $("partsReportSummary").textContent = `${items.length} part${items.length === 1 ? "" : "s"} · ${quantity.toFixed(2)} total on hand · ${formatMoney(value)} inventory value${missingCost ? ` · ${missingCost} without cost` : ""} · ${view.sourceRows.length} report row${view.sourceRows.length === 1 ? "" : "s"}`;
+      const photoSummary = view.format === "photo" ? ` · ${items.filter(item => item.photoData).length} with photos` : "";
+      $("partsReportSummary").textContent = `${items.length} part${items.length === 1 ? "" : "s"} · ${quantity.toFixed(2)} total on hand · ${formatMoney(value)} inventory value${missingCost ? ` · ${missingCost} without cost` : ""}${photoSummary} · ${view.sourceRows.length} report row${view.sourceRows.length === 1 ? "" : "s"}`;
       $("partsReportHead").innerHTML = `<tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
       $("partsReportRows").innerHTML = view.rows.map(row => `<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${view.headers.length}" class="empty">No parts match these report filters.</td></tr>`;
     }
@@ -3544,7 +3574,8 @@
       const popup = window.open("", "_blank", "width=1400,height=850");
       if (!popup) return alert("Allow pop-ups to create the Parts report PDF.");
       const tableRows = view.rows.map(row => `<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`).join("");
-      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:letter landscape;margin:.3in}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px;color:#1f684e}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse;table-layout:auto}th,td{border:1px solid #bac5bc;padding:5px;font-size:8.5px;vertical-align:top}th{background:#e9f0eb;text-align:left;text-transform:uppercase}tr{break-inside:avoid}td:nth-child(2){min-width:140px}</style></head><body><h1>LMS ${escapeHtml(view.title).toUpperCase()}</h1><div class="meta">Prepared ${escapeHtml(new Date().toLocaleString())} · ${view.items.length} parts · Inventory value ${formatMoney(value)}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),300));<\/script></body></html>`);
+      const photoCss = view.format === "photo" ? `.report-photo{width:68px;height:68px;object-fit:contain;display:block}.photo-placeholder{display:grid;place-items:center;background:#edf2ed;color:#667;font-size:7px;font-weight:bold}td:nth-child(1){width:15%}td:nth-child(2){width:74px}td:nth-child(4){width:45%;font-size:10px}` : `td:nth-child(2){min-width:140px}`;
+      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:letter landscape;margin:.3in}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px;color:#1f684e}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse;table-layout:auto}th,td{border:1px solid #bac5bc;padding:5px;font-size:8.5px;vertical-align:middle}th{background:#e9f0eb;text-align:left;text-transform:uppercase}tr{break-inside:avoid}${photoCss}</style></head><body><h1>LMS ${escapeHtml(view.title).toUpperCase()}</h1><div class="meta">Prepared ${escapeHtml(new Date().toLocaleString())} · ${view.items.length} parts · Inventory value ${formatMoney(value)}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),800));<\/script></body></html>`);
       popup.document.close();
     }
 
