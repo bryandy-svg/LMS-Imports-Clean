@@ -1617,7 +1617,7 @@
       <div class="modal-head"><h2>Parts Performance Report</h2><button type="button" class="icon-btn" id="closePartsReportBtn">X</button></div>
       <div class="modal-body">
         <div class="form-grid">
-          <label class="span-2">Report Type<select id="partsReportFormat"><option value="inventory">Inventory Value &amp; Stock Status</option><option value="photo">Photo Catalog by Category</option><option value="velocity">Fast / Slow / No Movement</option><option value="movement">Stock Movement Detail</option><option value="category">Summary by Category</option><option value="supplier">Summary by Supplier</option><option value="location">Summary by Location</option></select></label>
+          <label class="span-2">Report Type<select id="partsReportFormat"><option value="inventory">Inventory Value &amp; Stock Status</option><option value="reconciliation">Inventory Reconciliation</option><option value="quality">Data Quality / Missing Information</option><option value="photo">Photo Catalog by Category</option><option value="velocity">Fast / Slow / No Movement</option><option value="movement">Stock Movement Detail</option><option value="category">Summary by Category</option><option value="supplier">Summary by Supplier</option><option value="location">Summary by Location</option></select></label>
           <label>From Date<input id="partsReportFrom" type="date"></label>
           <label>To Date<input id="partsReportTo" type="date"></label>
           <label>Category<select id="partsReportCategory"></select></label>
@@ -3463,6 +3463,60 @@
     function partsReportView() {
       const format = $("partsReportFormat")?.value || "inventory";
       const items = partsReportFilters();
+      if (format === "reconciliation") {
+        const rows = items.map(item => {
+          const movements = (item.movements || []).filter(movement => {
+            const date = String(movement.date || "").slice(0, 10);
+            return (!$("partsReportFrom").value || date >= $("partsReportFrom").value)
+              && (!$("partsReportTo").value || date <= $("partsReportTo").value);
+          });
+          const received = movements.filter(movement => Number(movement.amount || 0) > 0).reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+          const issued = Math.abs(movements.filter(movement => Number(movement.amount || 0) < 0).reduce((sum, movement) => sum + Number(movement.amount || 0), 0));
+          const net = received - issued;
+          const ending = Number(item.quantity || 0);
+          const beginning = ending - net;
+          const countMovements = movements.filter(movement => String(movement.reason || "").toLowerCase().includes("physical inventory count"));
+          const variance = countMovements.reduce((sum, movement) => sum + Number(movement.amount || 0), 0);
+          return { item, beginning, received, issued, net, ending, variance };
+        }).sort((a, b) => String(a.item.category || "").localeCompare(String(b.item.category || "")) || String(a.item.name || "").localeCompare(String(b.item.name || "")));
+        return {
+          title: "Inventory Reconciliation",
+          format,
+          items,
+          sourceRows: rows,
+          headers: ["Part #", "Description", "Category", "Beginning Qty", "Received / Returned", "Issued / Deducted", "Net Change", "Ending Qty", "Count Variance", "Unit Cost", "Ending Value"],
+          rows: rows.map(row => ({
+            csv: [row.item.sku, row.item.name, row.item.category, row.beginning, row.received, row.issued, row.net, row.ending, row.variance, Number(row.item.unitCost || 0).toFixed(2), totalValue(row.item).toFixed(2)],
+            display: [row.item.sku, row.item.name, row.item.category, row.beginning, row.received, row.issued, row.net > 0 ? `+${row.net}` : row.net, row.ending, row.variance > 0 ? `+${row.variance}` : row.variance, formatMoney(row.item.unitCost || 0), formatMoney(totalValue(row.item))].map(value => escapeHtml(value))
+          }))
+        };
+      }
+      if (format === "quality") {
+        const qualityRows = items.map(item => {
+          const issues = [];
+          if (!String(item.sku || "").trim()) issues.push("Missing SKU");
+          if (!String(item.name || "").trim()) issues.push("Missing description");
+          if (!String(item.category || "").trim()) issues.push("Missing category");
+          if (!item.photoData) issues.push("Missing photo");
+          if (!normalizeStockLocations(item).some(row => row.location)) issues.push("Missing location");
+          if (!normalizeStockLocations(item).some(row => row.bin) && !String(item.bin || "").trim()) issues.push("Missing bin");
+          if (!String(item.supplier || "").trim()) issues.push("Missing supplier");
+          if (!(Number(item.unitCost || 0) > 0) && !item.costUnavailable) issues.push("Missing unit cost");
+          if (!(Number(item.reorderPoint || 0) > 0)) issues.push("Missing reorder level");
+          return { item, issues };
+        }).filter(row => row.issues.length).sort((a, b) => b.issues.length - a.issues.length || String(a.item.name || "").localeCompare(String(b.item.name || "")));
+        return {
+          title: "Inventory Data Quality",
+          format,
+          items,
+          sourceRows: qualityRows,
+          headers: ["Part #", "Description", "Category", "Qty On Hand", "Location", "Bin", "Supplier", "Problems Found", "Issue Count"],
+          rows: qualityRows.map(({ item, issues }) => ({
+            csv: [item.sku, item.name, item.category, Number(item.quantity || 0), item.location, item.bin, item.supplier, issues.join("; "), issues.length],
+            display: [item.sku, item.name, item.category, Number(item.quantity || 0), item.location, item.bin, item.supplier, issues.join("; "), issues.length].map(value => escapeHtml(value))
+          }))
+        };
+      }
       if (format === "photo") {
         const catalog = [...items].sort((a, b) => String(a.category || "Uncategorized").localeCompare(String(b.category || "Uncategorized")) || String(a.name || "").localeCompare(String(b.name || "")));
         return {
@@ -4220,7 +4274,7 @@
       $("syncDetail").textContent = "Loading requestable inventory before opening the mobile request form.";
       try {
         const client = await getSupabase();
-        const { data, error } = await client.from(settings.supabaseTable).select("payload,updated_at").order("updated_at", { ascending: false });
+        const { data, error } = await client.rpc("get_requestable_inventory");
         if (error) throw error;
         const onlineItems = (data || []).map(row => row.payload).filter(Boolean);
         state.items = mergeOnlineRecords(state.items, onlineItems);
@@ -4564,6 +4618,13 @@
         if (!$("itemForm").reportValidity()) return;
         const id = $("itemId").value || crypto.randomUUID();
         const existing = state.items.find(i => i.id === id);
+        const proposedSku = String($("sku").value || "").trim();
+        const normalizedSku = proposedSku.toLowerCase().replace(/[^a-z0-9]+/g, "");
+        const duplicate = normalizedSku && state.items.find(candidate => candidate.id !== id && String(candidate.sku || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "") === normalizedSku);
+        if (duplicate) {
+          alert(`Duplicate SKU blocked: ${proposedSku}\n\nOpen the existing item instead:\n${duplicate.name || duplicate.sku}`);
+          return;
+        }
         const item = existing || { id, createdAt: new Date().toISOString(), movements: [] };
         fields.forEach(field => {
           const value = $(field).value;
@@ -4629,14 +4690,15 @@
       openItem($("itemId").value);
     }
 
-    function quickAdjust(id, amount, reason = "Quick adjustment") {
+    async function quickAdjust(id, amount, reason = "Quick adjustment") {
       const item = state.items.find(i => i.id === id);
       if (!item) return;
       adjustStockLocation(item, "", Number(amount));
       item.updatedAt = new Date().toISOString();
       item.movements ||= [];
       item.movements.push({ amount: Number(amount), reason, date: new Date().toISOString() });
-      saveItems();
+      saveItems({ sync: false });
+      await pushAtomicInventoryChange(item, Number(amount), reason, item.location || "");
     }
 
     function setActualInventoryCount(item, actualCount) {
@@ -4687,11 +4749,12 @@
       const button = row.querySelector("[data-apply-count]");
       button.disabled = true;
       try {
-        setActualInventoryCount(item, Number(actualInput.value));
+        const difference = setActualInventoryCount(item, Number(actualInput.value));
         item.costUnavailable = unavailable;
         item.unitCost = unavailable ? 0 : Number(costInput.value);
         saveItems({ sync: false });
-        await pushSingleItemToSupabase(item, { silent: true });
+        if (difference) await pushAtomicInventoryChange(item, difference, "Physical inventory count", item.location || "", "", { silent: true });
+        else await pushSingleItemToSupabase(item, { silent: true });
         $("syncStatus").textContent = "Inventory count saved online";
         $("syncDetail").textContent = `${item.name} was adjusted to ${item.quantity} ${item.unit || ""}.`;
         render();
@@ -4717,7 +4780,7 @@
       if (unavailable) costInput.value = "";
     }
 
-    function adjustInventoryQuantity(id, mode = "adjust") {
+    async function adjustInventoryQuantity(id, mode = "adjust") {
       const item = state.items.find(i => i.id === id);
       if (!item) return;
       const verb = mode === "add" ? "add" : mode === "deduct" ? "deduct" : "adjust by";
@@ -4741,10 +4804,11 @@
       item.updatedAt = new Date().toISOString();
       item.movements ||= [];
       item.movements.push({ amount, reason, location: [row.location, row.bin].filter(Boolean).join(" / "), date: new Date().toISOString() });
-      saveItems();
+      saveItems({ sync: false });
+      await pushAtomicInventoryChange(item, amount, reason, [row.location, row.bin].filter(Boolean).join(" / "));
     }
 
-    function returnBorrowedItem(id) {
+    async function returnBorrowedItem(id) {
       const item = state.items.find(i => i.id === id);
       if (!item || item.issueType !== "Borrowed" || item.returnedDate) return;
       const qty = Math.max(0, Number(item.issuedQuantity || 0));
@@ -4764,7 +4828,8 @@
       item.updatedAt = new Date().toISOString();
       item.movements ||= [];
       item.movements.push({ amount: qty, reason: `Returned borrowed quantity from ${item.issuedTo || "borrower"}`, date: new Date().toISOString() });
-      saveItems();
+      saveItems({ sync: false });
+      await pushAtomicInventoryChange(item, qty, `Returned borrowed quantity from ${item.issuedTo || "borrower"}`, item.issuedFrom || item.location || "");
     }
 
     function renderPhotoPreview() {
@@ -5201,16 +5266,52 @@
       }
     }
 
+    async function pushAtomicInventoryChange(item, quantityChange, reason, location = "", referenceNumber = "", options = {}) {
+      if (!settings.supabaseUrl || !settings.supabaseKey || !item?.id) return pushSingleItemToSupabase(item, options);
+      const change = Number(quantityChange || 0);
+      if (!Number.isFinite(change) || change === 0) return pushSingleItemToSupabase(item, options);
+      try {
+        const client = await getSupabase();
+        const { data, error } = await client.rpc("apply_inventory_stock_change", {
+          p_item_id: item.id,
+          p_quantity_change: change,
+          p_reason: reason || "Inventory adjustment",
+          p_location: location || item.location || null,
+          p_reference_number: referenceNumber || null
+        });
+        if (error) {
+          if (/function .*apply_inventory_stock_change|schema cache/i.test(error.message || "")) {
+            throw new Error("Install supabase-inventory-safety-upgrade.sql before using atomic inventory adjustments.");
+          }
+          throw error;
+        }
+        const saved = Array.isArray(data) ? data[0] : data;
+        if (saved && Number.isFinite(Number(saved.quantity))) item.quantity = Number(saved.quantity);
+        item.updatedAt = saved?.updated_at || new Date().toISOString();
+        await pushSingleItemToSupabase(item, options);
+        return true;
+      } catch (error) {
+        $("syncStatus").textContent = "Atomic inventory save failed";
+        $("syncDetail").textContent = error.message;
+        if (!options.silent) alert(`Inventory was kept on this device, but the protected online update failed: ${error.message}`);
+        throw error;
+      }
+    }
+
     async function pushRequestChangeToSupabase(request, changedItems = []) {
       if (!settings.supabaseUrl || !settings.supabaseKey) return;
       const client = await getSupabase();
+      for (const item of [...new Map(changedItems.map(record => [record.id, record])).values()]) {
+        const movement = [...(item.movements || [])].reverse().find(entry => String(entry.reason || "").startsWith("Approved request:"));
+        if (movement && Number(movement.amount || 0) !== 0) {
+          await pushAtomicInventoryChange(item, Number(movement.amount), movement.reason, movement.location || item.issuedFrom || "", request.id, { silent: true });
+        } else {
+          await pushSingleItemToSupabase(item, { silent: true });
+        }
+      }
       const operations = [
         client.from(settings.requestTable).upsert(supabaseRequestRecord(request), { onConflict: "id" })
       ];
-      if (changedItems.length) {
-        const uniqueItems = [...new Map(changedItems.map(item => [item.id, item])).values()];
-        operations.push(client.from(settings.supabaseTable).upsert(uniqueItems.map(supabaseRecord), { onConflict: "id" }));
-      }
       const results = await Promise.all(operations);
       const failure = results.find(result => result.error);
       if (failure?.error) throw failure.error;

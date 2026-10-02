@@ -19,16 +19,17 @@ For the mobile screen, open the same app with `?request=1` at the end of the URL
 1. Create a Supabase project.
 2. Open the SQL editor.
 3. Run `supabase-schema.sql`.
-4. Open the app settings screen.
-5. Add the Supabase URL, anon key, table name `inventory_items`, and request table name `inventory_requests`.
-6. Set Sync Mode to **Supabase enabled**.
-7. The app will load from Supabase and save changes automatically.
+4. Run `supabase-inventory-safety-upgrade.sql`. This additive upgrade preserves existing data, restricts inventory to assigned signed-in users, creates the permanent stock ledger and atomic adjustment function, and adds reconciliation/data-quality views.
+5. Open the app settings screen.
+6. Add the Supabase URL, anon key, table name `inventory_items`, and request table name `inventory_requests`.
+7. Set Sync Mode to **Supabase enabled**.
+8. The app will load from Supabase and save changes automatically.
 
 The SQL creates two tables: `inventory_items` for the item register and `inventory_requests` for borrow/issue requests that can be approved or denied inside the app. Request records support multiple items, drawn signatures, and request photos.
 
 Use **Pull From Supabase** only when you want to manually reload the online copy. Use **Push Local Copy** only when you have local browser data that needs to be uploaded.
 
-The default SQL policies allow browser-side anon access for simple deployment. For production, tighten the row level security policies around authenticated users or your organization rules.
+The safety upgrade removes anonymous inventory read/write/delete access. The public mobile request page keeps insert-only request access, while inventory viewing and approvals require an assigned authenticated user.
 
 Photos are stored as compact browser data URLs inside each item's payload. Keep photos under 2 MB for smooth local storage, export, and Supabase sync.
 
@@ -36,6 +37,7 @@ Photos are stored as compact browser data URLs inside each item's payload. Keep 
 
 - `index.html` - complete standalone inventory monitoring app.
 - `supabase-schema.sql` - Supabase table, indexes, and starter policies.
+- `supabase-inventory-safety-upgrade.sql` - non-destructive production security, stock ledger, duplicate protection, atomic adjustments, and reporting views.
 - `vercel.json` - static deployment routing.
 - `.gitignore` - common local files to leave out of Git.
 # Piti Greenwaste email setup
