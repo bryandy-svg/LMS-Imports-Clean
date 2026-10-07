@@ -4499,7 +4499,7 @@
         const submitButton = event.submitter;
         if (submitButton) submitButton.disabled = true;
         try {
-          await pushRequestChangeToSupabase(request);
+          await submitPublicRequestToSupabase(request);
           alert("Request submitted successfully.");
           closeRequestModal();
         } catch (error) {
@@ -4515,6 +4515,24 @@
         }
         closeRequestModal();
       }
+    }
+
+    async function submitPublicRequestToSupabase(request) {
+      if (!settings.supabaseUrl || !settings.supabaseKey) throw new Error("Supabase is not configured.");
+      const client = await getSupabase();
+      const record = supabaseRequestRecord({
+        ...request,
+        status: "Pending",
+        approvedBy: "",
+        approvedAt: "",
+        deniedAt: ""
+      });
+      record.status = "Pending";
+      const { error } = await client.from(settings.requestTable).insert(record);
+      if (error) throw error;
+      rememberSyncCursor(requestSyncCursorKey, [{ updated_at: record.updated_at, payload: record.payload }], state.requests);
+      $("syncStatus").textContent = "Request submitted online";
+      $("syncDetail").textContent = `${request.itemName || "Request"} is waiting for approval.`;
     }
 
     async function approveRequest(id) {

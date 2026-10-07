@@ -20,10 +20,11 @@ For the mobile screen, open the same app with `?request=1` at the end of the URL
 2. Open the SQL editor.
 3. Run `supabase-schema.sql`.
 4. Run `supabase-inventory-safety-upgrade.sql`. This additive upgrade preserves existing data, restricts inventory to assigned signed-in users, creates the permanent stock ledger and atomic adjustment function, and adds reconciliation/data-quality views.
-5. Open the app settings screen.
-6. Add the Supabase URL, anon key, table name `inventory_items`, and request table name `inventory_requests`.
-7. Set Sync Mode to **Supabase enabled**.
-8. The app will load from Supabase and save changes automatically.
+5. Run `supabase-public-request-fix.sql` so the password-free mobile form can submit new pending requests using insert-only access.
+6. Open the app settings screen.
+7. Add the Supabase URL, anon key, table name `inventory_items`, and request table name `inventory_requests`.
+8. Set Sync Mode to **Supabase enabled**.
+9. The app will load from Supabase and save changes automatically.
 
 The SQL creates two tables: `inventory_items` for the item register and `inventory_requests` for borrow/issue requests that can be approved or denied inside the app. Request records support multiple items, drawn signatures, and request photos.
 
@@ -38,6 +39,7 @@ Photos are stored as compact browser data URLs inside each item's payload. Keep 
 - `index.html` - complete standalone inventory monitoring app.
 - `supabase-schema.sql` - Supabase table, indexes, and starter policies.
 - `supabase-inventory-safety-upgrade.sql` - non-destructive production security, stock ledger, duplicate protection, atomic adjustments, and reporting views.
+- `supabase-public-request-fix.sql` - insert-only permission fix for password-free mobile requests.
 - `vercel.json` - static deployment routing.
 - `.gitignore` - common local files to leave out of Git.
 # Piti Greenwaste email setup
