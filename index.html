@@ -3222,6 +3222,7 @@
 
     async function refreshRequestsRegister() {
       if (!settings.supabaseUrl || !settings.supabaseKey) return;
+      if (state.view === "requests") $("requestList").innerHTML = `<tr><td colspan="20" class="empty">Loading requests from Supabase…</td></tr>`;
       try {
         const client = await getSupabase();
         const { data, error } = await client.from(settings.requestTable).select("payload,updated_at").order("updated_at", { ascending: false });
@@ -3240,6 +3241,7 @@
       } catch (error) {
         $("syncStatus").textContent = "Request refresh failed";
         $("syncDetail").textContent = error.message;
+        if (state.view === "requests") $("requestList").innerHTML = `<tr><td colspan="20" class="empty">Could not load requests: ${escapeHtml(error.message)}</td></tr>`;
       }
     }
 
@@ -5706,8 +5708,16 @@
         : "Data saves in this browser until Supabase is connected.";
     }
 
-    document.querySelectorAll("[data-view-button]").forEach(button => button.addEventListener("click", () => { state.view = button.dataset.viewButton; render(); }));
-    document.querySelectorAll("[data-view-jump]").forEach(button => button.addEventListener("click", () => { state.view = button.dataset.viewJump; render(); }));
+    document.querySelectorAll("[data-view-button]").forEach(button => button.addEventListener("click", async () => {
+      state.view = button.dataset.viewButton;
+      render();
+      if (state.view === "requests") await refreshRequestsRegister();
+    }));
+    document.querySelectorAll("[data-view-jump]").forEach(button => button.addEventListener("click", async () => {
+      state.view = button.dataset.viewJump;
+      render();
+      if (state.view === "requests") await refreshRequestsRegister();
+    }));
     document.querySelectorAll("[data-nav-filter]").forEach(button => button.addEventListener("click", () => { state.quickFilter = button.dataset.navFilter; state.view = "inventory"; render(); }));
     document.querySelectorAll("[data-quick-filter]").forEach(button => button.addEventListener("click", () => { state.quickFilter = button.dataset.quickFilter; state.view = "inventory"; render(); }));
     document.querySelectorAll("[data-inventory-mode]").forEach(button => button.addEventListener("click", () => { state.inventoryMode = button.dataset.inventoryMode; state.view = "inventory"; render(); }));
