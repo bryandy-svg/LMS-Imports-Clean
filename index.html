@@ -1752,6 +1752,7 @@
     let syncTimer = null;
     let autoPullTimer = null;
     let isPullingFromSupabase = false;
+    let isRefreshingInventory = false;
     let sharedSupabaseClient = null;
     let sharedSupabaseUrl = "";
     let sharedSupabaseKey = "";
@@ -5605,9 +5606,58 @@
       clearInterval(autoPullTimer);
       if (!settings.supabaseUrl || !settings.supabaseKey) return;
       autoPullTimer = setInterval(() => {
-        if (document.hidden || isPullingFromSupabase) return;
-        pullSupabase({ silent: true, merge: true, auto: true, incremental: true });
-      }, 60000);
+        if (document.hidden || isPullingFromSupabase || isRefreshingInventory) return;
+        refreshChangedInventoryItems({ silent: true });
+      }, 20000);
+    }
+
+    async function refreshChangedInventoryItems(options = {}) {
+      if (!settings.supabaseUrl || !settings.supabaseKey || isRefreshingInventory) return 0;
+      isRefreshingInventory = true;
+      try {
+        const client = await getSupabase();
+        const { data: indexRows, error: indexError } = await client
+          .from(settings.supabaseTable)
+          .select("id,updated_at");
+        if (indexError) throw indexError;
+        const localById = new Map(state.items.filter(item => item?.id).map(item => [item.id, item]));
+        const changedIds = (indexRows || []).filter(row => {
+          const local = localById.get(row.id);
+          if (!local) return true;
+          const onlineTime = Date.parse(row.updated_at || "");
+          return Number.isFinite(onlineTime) && onlineTime > recordTime(local);
+        }).map(row => row.id);
+        if (!changedIds.length) return 0;
+        const changedItems = [];
+        const changedRows = [];
+        for (let index = 0; index < changedIds.length; index += 50) {
+          const ids = changedIds.slice(index, index + 50);
+          const { data, error } = await client
+            .from(settings.supabaseTable)
+            .select("id,payload,updated_at")
+            .in("id", ids);
+          if (error) throw error;
+          (data || []).forEach(row => {
+            if (row.payload) changedItems.push({ ...row.payload, updatedAt: row.updated_at || row.payload.updatedAt });
+            changedRows.push(row);
+          });
+        }
+        state.items = mergeOnlineRecords(state.items, changedItems);
+        await cacheItemPhotos(changedItems);
+        rememberSyncCursor(itemSyncCursorKey, changedRows, state.items);
+        saveItems({ sync: false });
+        $("syncStatus").textContent = "Inventory updated";
+        $("syncDetail").textContent = `Loaded ${changedItems.length} newer item change${changedItems.length === 1 ? "" : "s"} from other users.`;
+        return changedItems.length;
+      } catch (error) {
+        if (!options.silent) {
+          $("syncStatus").textContent = "Inventory refresh failed";
+          $("syncDetail").textContent = error.message;
+        }
+        return 0;
+      } finally {
+        isRefreshingInventory = false;
+      }
     }
 
     async function deleteSupabaseItem(id) {
@@ -5795,6 +5845,7 @@
       settings.syncMode = "supabase";
       startAutoSupabasePull();
       await pullSupabase({ silent: true, merge: true, auto: true, incremental: state.items.length > 0 || state.requests.length > 0 || state.greenwasteTickets.length > 0 });
+      await refreshChangedInventoryItems({ silent: true });
       await loadGreenwasteCustomersFromSupabase();
       await loadGreenwasteRatesFromSupabase();
       await restoreCachedPhotos();
@@ -6061,6 +6112,9 @@
     });
     $("pushSupabaseBtn").addEventListener("click", pushSupabase);
     $("pullSupabaseBtn").addEventListener("click", pullSupabase);
+    window.addEventListener("focus", () => {
+      if (!document.hidden && settings.supabaseUrl && settings.supabaseKey) refreshChangedInventoryItems({ silent: true });
+    });
     $("restorePhotosBtn").addEventListener("click", restorePhotosNow);
     $("testSupabaseBtn").addEventListener("click", testSupabase);
     $("saveSettingsBtn").addEventListener("click", () => {
