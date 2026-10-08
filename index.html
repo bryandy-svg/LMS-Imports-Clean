@@ -842,6 +842,9 @@
     .modal-head h2 { margin: 0; font-size: 18px; }
     .modal-body { padding: 18px; display: grid; gap: 16px; }
     .modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    .parts-report-pdf-controls { display: flex; align-items: end; justify-content: flex-end; gap: 10px; flex-wrap: wrap; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f7faf7; }
+    .parts-report-pdf-controls label { min-width: 150px; margin: 0; }
+    .parts-report-pdf-controls button { min-height: 42px; }
 
     .empty {
       padding: 30px;
@@ -1625,6 +1628,11 @@
           <label>Location<select id="partsReportLocation"></select></label>
           <label>Status<select id="partsReportStatus"></select></label>
           <label class="span-2">Part # / Description<input id="partsReportSearch" placeholder="Search SKU, item, barcode, supplier"></label>
+        </div>
+        <div class="parts-report-pdf-controls">
+          <label>PDF Paper Size<select id="partsReportPaperSize"><option value="letter">Letter (8.5 x 11)</option><option value="ledger">11 x 17</option></select></label>
+          <label>PDF Orientation<select id="partsReportOrientation"><option value="portrait">Portrait</option><option value="landscape" selected>Landscape</option></select></label>
+          <button class="primary" type="button" id="partsReportTopPdfBtn">Create PDF</button>
         </div>
         <div class="muted" id="partsReportSummary"></div>
         <div class="table-wrap"><table class="ticket-table"><thead id="partsReportHead"></thead><tbody id="partsReportRows"></tbody></table></div>
@@ -3639,12 +3647,19 @@
     function printPartsReport() {
       const view = partsReportView();
       if (!view.rows.length) return alert("No parts match the report filters.");
+      const paperSize = $("partsReportPaperSize")?.value === "ledger" ? "ledger" : "letter";
+      const orientation = $("partsReportOrientation")?.value === "portrait" ? "portrait" : "landscape";
+      const pageDimensions = paperSize === "ledger"
+        ? (orientation === "portrait" ? "11in 17in" : "17in 11in")
+        : (orientation === "portrait" ? "8.5in 11in" : "11in 8.5in");
+      const paperLabel = paperSize === "ledger" ? "11 x 17" : "Letter";
+      const tableFontSize = orientation === "portrait" ? (paperSize === "ledger" ? "7.5px" : "6.5px") : "8.5px";
       const value = view.items.reduce((sum, item) => sum + totalValue(item), 0);
       const popup = window.open("", "_blank", "width=1400,height=850");
       if (!popup) return alert("Allow pop-ups to create the Parts report PDF.");
       const tableRows = view.rows.map(row => `<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`).join("");
       const photoCss = view.format === "photo" ? `.report-photo{width:68px;height:68px;object-fit:contain;display:block}.photo-placeholder{display:grid;place-items:center;background:#edf2ed;color:#667;font-size:7px;font-weight:bold}td:nth-child(1){width:15%}td:nth-child(2){width:74px}td:nth-child(4){width:45%;font-size:10px}` : `td:nth-child(2){min-width:140px}`;
-      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:letter landscape;margin:.3in}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px;color:#1f684e}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse;table-layout:auto}th,td{border:1px solid #bac5bc;padding:5px;font-size:8.5px;vertical-align:middle}th{background:#e9f0eb;text-align:left;text-transform:uppercase}tr{break-inside:avoid}${photoCss}</style></head><body><h1>LMS ${escapeHtml(view.title).toUpperCase()}</h1><div class="meta">Prepared ${escapeHtml(new Date().toLocaleString())} · ${view.items.length} parts · Inventory value ${formatMoney(value)}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),800));<\/script></body></html>`);
+      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:${pageDimensions};margin:.3in}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px;color:#1f684e}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}th,td{border:1px solid #bac5bc;padding:5px;font-size:${tableFontSize};vertical-align:middle;overflow-wrap:anywhere}th{background:#e9f0eb;text-align:left;text-transform:uppercase}tr{break-inside:avoid;page-break-inside:avoid}${photoCss}</style></head><body><h1>LMS ${escapeHtml(view.title).toUpperCase()}</h1><div class="meta">Prepared ${escapeHtml(new Date().toLocaleString())} · ${view.items.length} parts · Inventory value ${formatMoney(value)} · ${paperLabel} · ${orientation[0].toUpperCase() + orientation.slice(1)}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),800));<\/script></body></html>`);
       popup.document.close();
     }
 
@@ -5749,6 +5764,7 @@
     $("closePartsReportBtn").addEventListener("click", closePartsReport);
     $("partsReportCsvBtn").addEventListener("click", exportPartsReportCsv);
     $("partsReportPdfBtn").addEventListener("click", printPartsReport);
+    $("partsReportTopPdfBtn").addEventListener("click", printPartsReport);
     ["partsReportFormat","partsReportFrom","partsReportTo","partsReportCategory","partsReportSupplier","partsReportLocation","partsReportStatus","partsReportSearch"].forEach(id => $(id).addEventListener(id === "partsReportSearch" ? "input" : "change", renderPartsReport));
     $("greenwasteForm").addEventListener("submit", saveGreenwasteTicket);
     $("parkGreenwasteTicketBtn").addEventListener("click", parkGreenwasteTicket);
