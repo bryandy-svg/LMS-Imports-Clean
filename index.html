@@ -525,6 +525,20 @@
       display: grid;
     }
 
+    .category-search-wrap { min-width: 0; width: 100%; }
+    .category-search-option {
+      width: 100%;
+      padding: 10px 12px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+    }
+    .category-search-option:hover,
+    .category-search-option:focus { background: #edf4ef; }
+
     .request-search-option {
       display: grid;
       grid-template-columns: 42px minmax(0, 1fr);
@@ -1449,7 +1463,7 @@
           <label class="span-2">Item Name<input id="name" required placeholder="Nitrile gloves, 4 mil"></label>
           <label>SKU<input id="sku" list="inventoryItemSkuOptions" autocomplete="off" placeholder="Search SKU or item"></label>
           <label>Barcode<input id="barcode" placeholder="UPC or internal code"></label>
-          <label>Category<div class="input-action"><input id="category" list="categoryOptions" autocomplete="off" placeholder="Search or select category"><datalist id="categoryOptions"></datalist><button type="button" id="addCategoryBtn">Add</button></div></label>
+          <label>Category<div class="input-action"><div class="request-search-wrap category-search-wrap"><input id="category" autocomplete="off" placeholder="Search or select category"><div class="request-search-results" id="categorySearchResults"></div></div><button type="button" id="addCategoryBtn">Add</button></div></label>
           <input id="quantity" type="hidden">
           <label>Unit<div class="input-action"><select id="unit"></select><button type="button" id="addUnitBtn">Add</button></div></label>
           <label>Reorder Point<input id="reorderPoint" type="number" min="0" step="1"></label>
@@ -2007,14 +2021,33 @@
 
     function renderCategoryOptions(selected = "") {
       const categoryInput = $("category");
-      const categoryOptions = $("categoryOptions");
-      if (!categoryInput || !categoryOptions) return;
+      if (!categoryInput) return;
       const current = selected || categoryInput.value || "General";
       if (current && !settings.customCategories?.includes(current) && !state.items.some(item => item.category === current)) {
         settings.customCategories = [...(settings.customCategories || []), current];
       }
-      categoryOptions.innerHTML = allCategories().map(category => `<option value="${escapeHtml(category)}"></option>`).join("");
       categoryInput.value = current;
+    }
+
+    function renderCategorySearchResults(showAll = false) {
+      const input = $("category");
+      const results = $("categorySearchResults");
+      if (!input || !results) return;
+      const query = showAll ? "" : input.value.trim().toLowerCase();
+      const matches = allCategories().filter(category => !query || category.toLowerCase().includes(query));
+      results.innerHTML = matches.map(category => `<button type="button" class="category-search-option" data-category-value="${escapeHtml(category)}">${escapeHtml(category)}</button>`).join("")
+        || `<div class="category-search-option"><strong>No matching category</strong><br><small class="muted">Use Add to create it.</small></div>`;
+      results.classList.add("open");
+    }
+
+    function closeCategorySearchResults() {
+      $("categorySearchResults")?.classList.remove("open");
+    }
+
+    function selectCategory(category) {
+      if (!category) return;
+      $("category").value = category;
+      closeCategorySearchResults();
     }
 
     function quickCreateCategory() {
@@ -2026,6 +2059,7 @@
       settings.customCategories = [...new Set([...(settings.customCategories || []), selected])].sort((a, b) => a.localeCompare(b));
       localStorage.setItem(settingsKey, JSON.stringify(settings));
       renderCategoryOptions(selected);
+      closeCategorySearchResults();
       saveSystemSettingsToSupabase({ silent: true });
     }
 
@@ -6163,6 +6197,16 @@
     });
     $("addUnitBtn").addEventListener("click", quickCreateUnit);
     $("addCategoryBtn").addEventListener("click", quickCreateCategory);
+    $("category").addEventListener("focus", () => renderCategorySearchResults(true));
+    $("category").addEventListener("click", () => renderCategorySearchResults(true));
+    $("category").addEventListener("input", () => renderCategorySearchResults(false));
+    $("categorySearchResults").addEventListener("click", event => {
+      const option = event.target.closest("[data-category-value]");
+      if (option) selectCategory(option.dataset.categoryValue);
+    });
+    document.addEventListener("click", event => {
+      if (!event.target.closest(".category-search-wrap")) closeCategorySearchResults();
+    });
     $("addStockLocationBtn").addEventListener("click", addStockLocation);
     $("stockLocationsList").addEventListener("input", updateQuantityFromStockLocations);
     $("closeRequestModalBtn").addEventListener("click", closeRequestModal);
