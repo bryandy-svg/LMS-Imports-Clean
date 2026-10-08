@@ -3540,7 +3540,7 @@
       if (format === "photo") {
         const catalog = [...items].sort((a, b) => String(a.category || "Uncategorized").localeCompare(String(b.category || "Uncategorized")) || String(a.name || "").localeCompare(String(b.name || "")));
         return {
-          title: "Mall Lot Inventor",
+          title: "Mall Lot Inventory",
           format,
           items,
           sourceRows: catalog,
@@ -3686,7 +3686,7 @@
         return `${categoryHeading}<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`;
       }).join("");
       const photoCss = view.format === "photo" ? `.report-photo{width:68px;height:68px;object-fit:contain;display:block}.photo-placeholder{display:grid;place-items:center;background:#edf2ed;color:#667;font-size:7px;font-weight:bold}.category-heading th{background:#1f684e;color:#fff;font-size:11px;padding:7px;text-transform:none}.category-heading{break-after:avoid;page-break-after:avoid}td:nth-child(1){width:74px}td:nth-child(3){width:42%;font-size:10px}td:nth-child(4),td:nth-child(5),td:nth-child(6),td:nth-child(7){white-space:nowrap}` : `td:nth-child(2){min-width:140px}`;
-      const reportHeading = view.format === "photo" ? "LMS MALL LOT INVENTOR" : `LMS ${escapeHtml(view.title).toUpperCase()}`;
+      const reportHeading = view.format === "photo" ? "LMS MALL LOT INVENTORY" : `LMS ${escapeHtml(view.title).toUpperCase()}`;
       const reportMeta = `Prepared ${escapeHtml(new Date().toLocaleString())} · ${view.items.length} parts · ${paperLabel} · ${orientation[0].toUpperCase() + orientation.slice(1)}`;
       popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:${pageDimensions};margin:.3in}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px;color:#1f684e}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}th,td{border:1px solid #bac5bc;padding:5px;font-size:${tableFontSize};vertical-align:middle;overflow-wrap:anywhere}th{background:#e9f0eb;text-align:left;text-transform:uppercase}tr{break-inside:avoid;page-break-inside:avoid}${photoCss}</style></head><body><h1>${reportHeading}</h1><div class="meta">${reportMeta}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),800));<\/script></body></html>`);
       popup.document.close();
