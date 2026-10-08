@@ -693,11 +693,21 @@
     }
     #partsReportModal .photo-catalog-table th,
     #partsReportModal .photo-catalog-table td { white-space: normal; vertical-align: middle; }
-    #partsReportModal .photo-catalog-table th:nth-child(1) { width: 14%; }
-    #partsReportModal .photo-catalog-table th:nth-child(2) { width: 88px; }
-    #partsReportModal .photo-catalog-table th:nth-child(3) { width: 18%; }
-    #partsReportModal .photo-catalog-table th:nth-child(5) { width: 100px; }
-    #partsReportModal .photo-catalog-table th:nth-child(6) { width: 70px; }
+    #partsReportModal .photo-catalog-table th:nth-child(1) { width: 88px; }
+    #partsReportModal .photo-catalog-table th:nth-child(2) { width: 18%; }
+    #partsReportModal .photo-catalog-table th:nth-child(3) { width: 38%; }
+    #partsReportModal .photo-catalog-table th:nth-child(4) { width: 100px; }
+    #partsReportModal .photo-catalog-table th:nth-child(5) { width: 70px; }
+    #partsReportModal .photo-catalog-table th:nth-child(6),
+    #partsReportModal .photo-catalog-table th:nth-child(7) { width: 105px; }
+    #partsReportModal .photo-catalog-table .parts-report-category th {
+      width: auto;
+      background: var(--green);
+      color: #fff;
+      font-size: 14px;
+      padding: 9px 12px;
+      text-transform: none;
+    }
 
     .photo-preview {
       width: 120px;
@@ -3530,18 +3540,20 @@
       if (format === "photo") {
         const catalog = [...items].sort((a, b) => String(a.category || "Uncategorized").localeCompare(String(b.category || "Uncategorized")) || String(a.name || "").localeCompare(String(b.name || "")));
         return {
-          title: "Parts Photo Catalog by Category",
+          title: "Mall Lot Inventor",
           format,
           items,
           sourceRows: catalog,
-          headers: ["Category", "Photo", "Part #", "Parts Description", "Qty On Hand", "Unit"],
+          headers: ["Photo", "Part #", "Parts Description", "Qty On Hand", "Unit", "Cost Each", "Total Value"],
+          csvHeaders: ["Category", "Photo", "Part #", "Parts Description", "Qty On Hand", "Unit", "Cost Each", "Total Value"],
           rows: catalog.map(item => {
             const photo = item.photoData
               ? `<img class="report-photo" src="${escapeHtml(item.photoData)}" alt="${escapeHtml(item.name || "Part")} photo">`
               : `<div class="report-photo photo-placeholder">NO PHOTO</div>`;
             return {
-              csv: [item.category || "Uncategorized", item.photoData ? "Yes" : "No", item.sku, item.name, Number(item.quantity || 0), item.unit],
-              display: [escapeHtml(item.category || "Uncategorized"), photo, escapeHtml(item.sku || ""), escapeHtml(item.name || ""), escapeHtml(Number(item.quantity || 0)), escapeHtml(item.unit || "")]
+              category: item.category || "Uncategorized",
+              csv: [item.category || "Uncategorized", item.photoData ? "Yes" : "No", item.sku, item.name, Number(item.quantity || 0), item.unit, Number(item.unitCost || 0).toFixed(2), totalValue(item).toFixed(2)],
+              display: [photo, escapeHtml(item.sku || ""), escapeHtml(item.name || ""), escapeHtml(Number(item.quantity || 0)), escapeHtml(item.unit || ""), escapeHtml(formatMoney(item.unitCost || 0)), escapeHtml(formatMoney(totalValue(item)))]
             };
           })
         };
@@ -3610,10 +3622,19 @@
       const value = items.reduce((sum, item) => sum + totalValue(item), 0);
       const missingCost = items.filter(item => !(Number(item.unitCost || 0) > 0)).length;
       const photoSummary = view.format === "photo" ? ` · ${items.filter(item => item.photoData).length} with photos` : "";
-      $("partsReportSummary").textContent = `${items.length} part${items.length === 1 ? "" : "s"} · ${quantity.toFixed(2)} total on hand · ${formatMoney(value)} inventory value${missingCost ? ` · ${missingCost} without cost` : ""}${photoSummary} · ${view.sourceRows.length} report row${view.sourceRows.length === 1 ? "" : "s"}`;
+      $("partsReportSummary").textContent = view.format === "photo"
+        ? `${items.length} part${items.length === 1 ? "" : "s"} · ${quantity.toFixed(2)} total on hand${missingCost ? ` · ${missingCost} without cost` : ""}${photoSummary} · ${view.sourceRows.length} report row${view.sourceRows.length === 1 ? "" : "s"}`
+        : `${items.length} part${items.length === 1 ? "" : "s"} · ${quantity.toFixed(2)} total on hand · ${formatMoney(value)} inventory value${missingCost ? ` · ${missingCost} without cost` : ""}${photoSummary} · ${view.sourceRows.length} report row${view.sourceRows.length === 1 ? "" : "s"}`;
       $("partsReportHead").closest("table").classList.toggle("photo-catalog-table", view.format === "photo");
       $("partsReportHead").innerHTML = `<tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
-      $("partsReportRows").innerHTML = view.rows.map(row => `<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${view.headers.length}" class="empty">No parts match these report filters.</td></tr>`;
+      let currentCategory = null;
+      $("partsReportRows").innerHTML = view.rows.map(row => {
+        const categoryHeading = view.format === "photo" && row.category !== currentCategory
+          ? `<tr class="parts-report-category"><th colspan="${view.headers.length}">${escapeHtml(row.category)}</th></tr>`
+          : "";
+        if (view.format === "photo") currentCategory = row.category;
+        return `${categoryHeading}<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`;
+      }).join("") || `<tr><td colspan="${view.headers.length}" class="empty">No parts match these report filters.</td></tr>`;
     }
 
     function populatePartsReportFilters() {
@@ -3640,7 +3661,7 @@
     function exportPartsReportCsv() {
       const view = partsReportView();
       if (!view.rows.length) return alert("No parts match the report filters.");
-      const data = [view.headers, ...view.rows.map(row => row.csv)];
+      const data = [view.csvHeaders || view.headers, ...view.rows.map(row => row.csv)];
       download(`Parts-Report-${new Date().toISOString().slice(0,10)}.csv`, data.map(row => row.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8");
     }
 
@@ -3654,12 +3675,20 @@
         : (orientation === "portrait" ? "8.5in 11in" : "11in 8.5in");
       const paperLabel = paperSize === "ledger" ? "11 x 17" : "Letter";
       const tableFontSize = orientation === "portrait" ? (paperSize === "ledger" ? "7.5px" : "6.5px") : "8.5px";
-      const value = view.items.reduce((sum, item) => sum + totalValue(item), 0);
       const popup = window.open("", "_blank", "width=1400,height=850");
       if (!popup) return alert("Allow pop-ups to create the Parts report PDF.");
-      const tableRows = view.rows.map(row => `<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`).join("");
-      const photoCss = view.format === "photo" ? `.report-photo{width:68px;height:68px;object-fit:contain;display:block}.photo-placeholder{display:grid;place-items:center;background:#edf2ed;color:#667;font-size:7px;font-weight:bold}td:nth-child(1){width:15%}td:nth-child(2){width:74px}td:nth-child(4){width:45%;font-size:10px}` : `td:nth-child(2){min-width:140px}`;
-      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:${pageDimensions};margin:.3in}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px;color:#1f684e}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}th,td{border:1px solid #bac5bc;padding:5px;font-size:${tableFontSize};vertical-align:middle;overflow-wrap:anywhere}th{background:#e9f0eb;text-align:left;text-transform:uppercase}tr{break-inside:avoid;page-break-inside:avoid}${photoCss}</style></head><body><h1>LMS ${escapeHtml(view.title).toUpperCase()}</h1><div class="meta">Prepared ${escapeHtml(new Date().toLocaleString())} · ${view.items.length} parts · Inventory value ${formatMoney(value)} · ${paperLabel} · ${orientation[0].toUpperCase() + orientation.slice(1)}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),800));<\/script></body></html>`);
+      let currentCategory = null;
+      const tableRows = view.rows.map(row => {
+        const categoryHeading = view.format === "photo" && row.category !== currentCategory
+          ? `<tr class="category-heading"><th colspan="${view.headers.length}">${escapeHtml(row.category)}</th></tr>`
+          : "";
+        if (view.format === "photo") currentCategory = row.category;
+        return `${categoryHeading}<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`;
+      }).join("");
+      const photoCss = view.format === "photo" ? `.report-photo{width:68px;height:68px;object-fit:contain;display:block}.photo-placeholder{display:grid;place-items:center;background:#edf2ed;color:#667;font-size:7px;font-weight:bold}.category-heading th{background:#1f684e;color:#fff;font-size:11px;padding:7px;text-transform:none}.category-heading{break-after:avoid;page-break-after:avoid}td:nth-child(1){width:74px}td:nth-child(3){width:42%;font-size:10px}td:nth-child(4),td:nth-child(5),td:nth-child(6),td:nth-child(7){white-space:nowrap}` : `td:nth-child(2){min-width:140px}`;
+      const reportHeading = view.format === "photo" ? "LMS MALL LOT INVENTOR" : `LMS ${escapeHtml(view.title).toUpperCase()}`;
+      const reportMeta = `Prepared ${escapeHtml(new Date().toLocaleString())} · ${view.items.length} parts · ${paperLabel} · ${orientation[0].toUpperCase() + orientation.slice(1)}`;
+      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:${pageDimensions};margin:.3in}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px;color:#1f684e}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}th,td{border:1px solid #bac5bc;padding:5px;font-size:${tableFontSize};vertical-align:middle;overflow-wrap:anywhere}th{background:#e9f0eb;text-align:left;text-transform:uppercase}tr{break-inside:avoid;page-break-inside:avoid}${photoCss}</style></head><body><h1>${reportHeading}</h1><div class="meta">${reportMeta}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),800));<\/script></body></html>`);
       popup.document.close();
     }
 
