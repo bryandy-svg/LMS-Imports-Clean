@@ -1753,6 +1753,7 @@
     let autoPullTimer = null;
     let isPullingFromSupabase = false;
     let isRefreshingInventory = false;
+    let inventoryRealtimeChannel = null;
     let sharedSupabaseClient = null;
     let sharedSupabaseUrl = "";
     let sharedSupabaseKey = "";
@@ -3116,16 +3117,21 @@
     function renderIssuanceHistoryTable() {
       const rows = issuanceHistoryRows();
       $("inventoryTable").closest("table").classList.remove("inventory-count-table");
-      $("inventoryHead").innerHTML = `<tr><th>Actions</th><th>Date</th><th>Item</th><th>SKU</th><th>Issued / Borrowed Qty</th><th>Unit</th><th>From Location</th><th>Jobsite</th><th>Requested By</th><th>Approved By</th><th>Signer</th><th>Company</th><th>PO #</th><th>Return Date</th><th>Return Status</th><th>Current Inventory Balance</th></tr>`;
-      $("inventoryTable").innerHTML = rows.map(({ request, line, item }) => `<tr>
+      $("inventoryHead").innerHTML = `<tr><th>Actions</th><th>Date</th><th>Item</th><th>SKU</th><th>Issued / Borrowed Qty</th><th>Unit</th><th>Unit Cost</th><th>Total Cost</th><th>From Location</th><th>Jobsite</th><th>Requested By</th><th>Approved By</th><th>Signer</th><th>Company</th><th>PO #</th><th>Return Date</th><th>Return Status</th><th>Current Inventory Balance</th></tr>`;
+      $("inventoryTable").innerHTML = rows.map(({ request, line, item }) => {
+        const unitCost = requestLineCost(line);
+        const totalCost = unitCost === null ? null : unitCost * Number(line.quantity || 0);
+        return `<tr>
         <td><button class="action-btn" onclick="openRequest('${request.id}')">Open Request</button></td>
         <td>${escapeHtml(request.requestDate || "")}</td><td><strong>${escapeHtml(line.itemName || item?.name || "")}</strong></td><td>${escapeHtml(line.sku || item?.sku || "")}</td>
-        <td class="number"><strong>${Number(line.quantity || 0)}</strong></td><td>${escapeHtml(line.unit || item?.unit || "")}</td><td>${escapeHtml(line.locationName || "")}</td>
+        <td class="number"><strong>${Number(line.quantity || 0)}</strong></td><td>${escapeHtml(line.unit || item?.unit || "")}</td>
+        <td class="number">${unitCost === null ? "N/A" : formatMoney(unitCost)}</td><td class="number"><strong>${totalCost === null ? "N/A" : formatMoney(totalCost)}</strong></td><td>${escapeHtml(line.locationName || "")}</td>
         <td>${escapeHtml(request.jobsite || "")}</td><td>${escapeHtml(request.requestedBy || "")}</td><td>${escapeHtml(request.approvedBy || "")}</td><td>${escapeHtml(request.signatureName || "")}</td>
         <td>${escapeHtml(request.company || "")}</td><td>${escapeHtml(request.poNumber || "")}</td><td>${escapeHtml(request.returnDate || "")}</td>
         <td>${escapeHtml(request.requestType === "Borrowed" ? (item?.returnedDate ? `Returned ${item.returnedDate}` : "Pending Return") : "Not Returnable")}</td>
         <td class="number">${item ? `${Number(item.quantity || 0)} ${escapeHtml(item.unit || "")}` : "Item unavailable"}</td>
-      </tr>`).join("") || `<tr><td colspan="16" class="empty">No approved ${state.quickFilter === "borrowed" ? "borrowing" : "issuance"} records found.</td></tr>`;
+      </tr>`;
+      }).join("") || `<tr><td colspan="18" class="empty">No approved ${state.quickFilter === "borrowed" ? "borrowing" : "issuance"} records found.</td></tr>`;
     }
 
     function renderInventoryCountTable(items) {
@@ -3270,10 +3276,14 @@
     }
 
     function requestLineCost(line) {
-      if (line.costUnavailable === true) return null;
-      if (line.unitCost !== undefined && line.unitCost !== null && line.unitCost !== "") return Number(line.unitCost || 0);
       const item = state.items.find(record => record.id === line.itemId);
-      return item && !item.costUnavailable ? Number(item.unitCost || 0) : null;
+      const savedLineCost = line.unitCost !== undefined && line.unitCost !== null && line.unitCost !== ""
+        ? Number(line.unitCost || 0)
+        : null;
+      if (savedLineCost !== null && savedLineCost > 0) return savedLineCost;
+      if (item && !item.costUnavailable && Number(item.unitCost || 0) > 0) return Number(item.unitCost);
+      if (line.costUnavailable === true || item?.costUnavailable) return null;
+      return savedLineCost;
     }
 
     function requestRegisterRow(request, line) {
@@ -5041,14 +5051,19 @@
       const showIssueColumns = isIssueTrackingView();
       if (showIssueColumns) {
         const rows = issuanceHistoryRows();
-        const headers = ["Date","Type","Item","SKU","Quantity","Unit","From Location","Jobsite","Requested By","Approved By","Signer","Company","PO #","Return Date","Return Status","Current Inventory Balance"];
-        const data = rows.map(({ request, line, item }) => [
-          request.requestDate, request.requestType, line.itemName || item?.name, line.sku || item?.sku,
-          Number(line.quantity || 0), line.unit || item?.unit, line.locationName, request.jobsite, request.requestedBy,
-          request.approvedBy, request.signatureName, request.company, request.poNumber, request.returnDate,
-          request.requestType === "Borrowed" ? (item?.returnedDate ? `Returned ${item.returnedDate}` : "Pending Return") : "Not Returnable",
-          item ? Number(item.quantity || 0) : ""
-        ]);
+        const headers = ["Date","Type","Item","SKU","Quantity","Unit","Unit Cost","Total Cost","From Location","Jobsite","Requested By","Approved By","Signer","Company","PO #","Return Date","Return Status","Current Inventory Balance"];
+        const data = rows.map(({ request, line, item }) => {
+          const unitCost = requestLineCost(line);
+          const totalCost = unitCost === null ? "" : unitCost * Number(line.quantity || 0);
+          return [
+            request.requestDate, request.requestType, line.itemName || item?.name, line.sku || item?.sku,
+            Number(line.quantity || 0), line.unit || item?.unit, unitCost === null ? "" : unitCost, totalCost,
+            line.locationName, request.jobsite, request.requestedBy, request.approvedBy, request.signatureName,
+            request.company, request.poNumber, request.returnDate,
+            request.requestType === "Borrowed" ? (item?.returnedDate ? `Returned ${item.returnedDate}` : "Pending Return") : "Not Returnable",
+            item ? Number(item.quantity || 0) : ""
+          ];
+        });
         const filename = state.quickFilter === "permanent" ? "all-issued-transactions.csv" : "all-borrowed-transactions.csv";
         download(filename, [headers.map(csvCell).join(","), ...data.map(row => row.map(csvCell).join(","))].join("\n"), "text/csv");
         return;
@@ -5406,6 +5421,7 @@
         await protectMissingPhotosBeforePush(client, [record]);
         const { error } = await client.from(settings.supabaseTable).upsert(record, { onConflict: "id" });
         if (error) throw error;
+        await broadcastInventoryChange(item.id, "UPSERT");
         rememberSyncCursor(itemSyncCursorKey, [{ updated_at: record.updated_at, payload: record.payload }], state.items);
         $("syncStatus").textContent = "Saved online";
         $("syncDetail").textContent = `${item.name || "Item"} is now saved to Supabase and available for mobile requests.`;
@@ -5608,7 +5624,78 @@
       autoPullTimer = setInterval(() => {
         if (document.hidden || isPullingFromSupabase || isRefreshingInventory) return;
         refreshChangedInventoryItems({ silent: true });
-      }, 20000);
+      }, 60000);
+    }
+
+    async function startInventoryRealtime() {
+      if (!settings.supabaseUrl || !settings.supabaseKey) return;
+      try {
+        const client = await getSupabase();
+        if (inventoryRealtimeChannel) {
+          await client.removeChannel(inventoryRealtimeChannel);
+          inventoryRealtimeChannel = null;
+        }
+        const table = settings.supabaseTable || "inventory_items";
+        inventoryRealtimeChannel = client
+          .channel(`inventory-live-${table}`)
+          .on("broadcast", { event: "inventory-change" }, message => {
+            const id = message?.payload?.id;
+            if (id) refreshInventoryItemById(id, message.payload.action);
+            else refreshChangedInventoryItems({ silent: true });
+          })
+          .subscribe(status => {
+            if (status === "SUBSCRIBED") {
+              $("syncStatus").textContent = "Live inventory connected";
+              $("syncDetail").textContent = "Changes from other users will appear immediately.";
+            } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+              $("syncStatus").textContent = "Live updates reconnecting";
+              $("syncDetail").textContent = "The automatic one-minute backup refresh remains active.";
+            }
+          });
+      } catch (error) {
+        $("syncStatus").textContent = "Live updates unavailable";
+        $("syncDetail").textContent = `${error.message}. The automatic one-minute backup refresh remains active.`;
+      }
+    }
+
+    async function broadcastInventoryChange(id, action = "UPSERT") {
+      if (!inventoryRealtimeChannel || !id) return;
+      try {
+        await inventoryRealtimeChannel.send({
+          type: "broadcast",
+          event: "inventory-change",
+          payload: { id, action }
+        });
+      } catch {
+        // The periodic comparison recovers the change if the live channel drops.
+      }
+    }
+
+    async function refreshInventoryItemById(id, action = "UPSERT") {
+      if (!id) return;
+      if (String(action).toUpperCase() === "DELETE") {
+        state.items = state.items.filter(item => item.id !== id);
+        saveItems({ sync: false });
+        return;
+      }
+      try {
+        const client = await getSupabase();
+        const { data, error } = await client
+          .from(settings.supabaseTable)
+          .select("id,payload,updated_at")
+          .eq("id", id)
+          .maybeSingle();
+        if (error) throw error;
+        if (!data?.payload) return;
+        const incoming = { ...data.payload, updatedAt: data.updated_at || data.payload.updatedAt };
+        state.items = mergeOnlineRecords(state.items, [incoming]);
+        await cacheItemPhotos([incoming]);
+        saveItems({ sync: false });
+        $("syncStatus").textContent = "Live inventory updated";
+        $("syncDetail").textContent = `${incoming.name || "Inventory item"} was updated by another user.`;
+      } catch {
+        refreshChangedInventoryItems({ silent: true });
+      }
     }
 
     async function refreshChangedInventoryItems(options = {}) {
@@ -5666,6 +5753,7 @@
         const client = await getSupabase();
         const { error } = await client.from(settings.supabaseTable).delete().eq("id", id);
         if (error) throw error;
+        await broadcastInventoryChange(id, "DELETE");
         $("syncStatus").textContent = "Synced to Supabase";
         $("syncDetail").textContent = "Deleted item was removed online.";
       } catch (error) {
@@ -5844,6 +5932,7 @@
       if (!settings.supabaseUrl || !settings.supabaseKey) return;
       settings.syncMode = "supabase";
       startAutoSupabasePull();
+      await startInventoryRealtime();
       await pullSupabase({ silent: true, merge: true, auto: true, incremental: state.items.length > 0 || state.requests.length > 0 || state.greenwasteTickets.length > 0 });
       await refreshChangedInventoryItems({ silent: true });
       await loadGreenwasteCustomersFromSupabase();
