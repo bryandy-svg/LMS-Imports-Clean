@@ -1449,7 +1449,7 @@
           <label class="span-2">Item Name<input id="name" required placeholder="Nitrile gloves, 4 mil"></label>
           <label>SKU<input id="sku" list="inventoryItemSkuOptions" autocomplete="off" placeholder="Search SKU or item"></label>
           <label>Barcode<input id="barcode" placeholder="UPC or internal code"></label>
-          <label>Category<input id="category" placeholder="Medical, Cleaning, Parts"></label>
+          <label>Category<div class="input-action"><input id="category" list="categoryOptions" autocomplete="off" placeholder="Search or select category"><datalist id="categoryOptions"></datalist><button type="button" id="addCategoryBtn">Add</button></div></label>
           <input id="quantity" type="hidden">
           <label>Unit<div class="input-action"><select id="unit"></select><button type="button" id="addUnitBtn">Add</button></div></label>
           <label>Reorder Point<input id="reorderPoint" type="number" min="0" step="1"></label>
@@ -1742,7 +1742,8 @@
       adminPassword: localStorage.getItem(adminPasswordKey) || "Landscape1",
       mobileInventoryPassword: localStorage.getItem(mobilePasswordKey) || "",
       hiddenColumns: [],
-      customUnits: []
+      customUnits: [],
+      customCategories: []
     }, JSON.parse(localStorage.getItem(settingsKey) || "{}"));
     settings.adminPassword = settings.adminPassword || localStorage.getItem(adminPasswordKey) || "Landscape1";
     settings.mobileInventoryPassword = settings.mobileInventoryPassword || localStorage.getItem(mobilePasswordKey) || "";
@@ -1992,6 +1993,39 @@
       localStorage.setItem(settingsKey, JSON.stringify(settings));
       renderUnitOptions(clean);
       updateIssuedUnitHint();
+      saveSystemSettingsToSupabase({ silent: true });
+    }
+
+    function allCategories() {
+      return [...new Set([
+        "General",
+        ...(settings.customCategories || []),
+        ...state.items.map(item => item.category).filter(Boolean)
+      ].map(category => String(category || "").trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+    }
+
+    function renderCategoryOptions(selected = "") {
+      const categoryInput = $("category");
+      const categoryOptions = $("categoryOptions");
+      if (!categoryInput || !categoryOptions) return;
+      const current = selected || categoryInput.value || "General";
+      if (current && !settings.customCategories?.includes(current) && !state.items.some(item => item.category === current)) {
+        settings.customCategories = [...(settings.customCategories || []), current];
+      }
+      categoryOptions.innerHTML = allCategories().map(category => `<option value="${escapeHtml(category)}"></option>`).join("");
+      categoryInput.value = current;
+    }
+
+    function quickCreateCategory() {
+      const category = prompt("Enter new inventory category", $("category").value || "General");
+      const clean = String(category || "").trim();
+      if (!clean) return;
+      const existing = allCategories().find(value => value.toLowerCase() === clean.toLowerCase());
+      const selected = existing || clean;
+      settings.customCategories = [...new Set([...(settings.customCategories || []), selected])].sort((a, b) => a.localeCompare(b));
+      localStorage.setItem(settingsKey, JSON.stringify(settings));
+      renderCategoryOptions(selected);
       saveSystemSettingsToSupabase({ silent: true });
     }
 
@@ -3915,8 +3949,9 @@
       renderInventoryFormLookups();
       $("modalTitle").textContent = item ? "Edit Item" : "Add Item";
       $("itemId").value = item?.id || "";
-      renderUnitOptions(item?.unit || "each");
       fields.forEach(field => { $(field).value = item?.[field] ?? ""; });
+      renderUnitOptions(item?.unit || "each");
+      renderCategoryOptions(item?.category || "General");
       renderStockLocationLines(item ? normalizeStockLocations(item) : []);
       updateIssuedUnitHint();
       renderPhotoPreview();
@@ -4800,8 +4835,9 @@
         }
         if (item.unit) {
           settings.customUnits = [...new Set([...(settings.customUnits || []), item.unit])].sort((a, b) => a.localeCompare(b));
-          localStorage.setItem(settingsKey, JSON.stringify(settings));
         }
+        if (item.category) settings.customCategories = [...new Set([...(settings.customCategories || []), item.category])].sort((a, b) => a.localeCompare(b));
+        localStorage.setItem(settingsKey, JSON.stringify(settings));
         item.updatedAt = new Date().toISOString();
         if (!existing) state.items.unshift(item);
         saveItems({ sync: false });
@@ -5518,12 +5554,16 @@
       if (Array.isArray(payload.customUnits)) {
         settings.customUnits = [...new Set([...(settings.customUnits || []), ...payload.customUnits])].sort((a, b) => a.localeCompare(b));
       }
+      if (Array.isArray(payload.customCategories)) {
+        settings.customCategories = [...new Set([...(settings.customCategories || []), ...payload.customCategories])].sort((a, b) => a.localeCompare(b));
+      }
       localStorage.setItem(adminPasswordKey, settings.adminPassword || "Landscape1");
       localStorage.setItem(mobilePasswordKey, settings.mobileInventoryPassword);
       localStorage.setItem(settingsKey, JSON.stringify(settings));
       if ($("adminPassword")) $("adminPassword").value = settings.adminPassword;
       if ($("mobileInventoryPassword")) $("mobileInventoryPassword").value = settings.mobileInventoryPassword;
       renderUnitOptions($("unit")?.value);
+      renderCategoryOptions($("category")?.value);
     }
 
     function systemSettingsPayload() {
@@ -5533,6 +5573,7 @@
         adminPassword: settings.adminPassword || "Landscape1",
         mobileInventoryPassword: settings.mobileInventoryPassword || "",
         customUnits: settings.customUnits || [],
+        customCategories: settings.customCategories || [],
         updatedAt: new Date().toISOString()
       };
     }
@@ -6121,6 +6162,7 @@
       openItem(existing.id);
     });
     $("addUnitBtn").addEventListener("click", quickCreateUnit);
+    $("addCategoryBtn").addEventListener("click", quickCreateCategory);
     $("addStockLocationBtn").addEventListener("click", addStockLocation);
     $("stockLocationsList").addEventListener("input", updateQuantityFromStockLocations);
     $("closeRequestModalBtn").addEventListener("click", closeRequestModal);
@@ -6222,6 +6264,7 @@
     $("adminPassword").value = settings.adminPassword || "Landscape1";
     $("mobileInventoryPassword").value = settings.mobileInventoryPassword || "";
     renderUnitOptions("each");
+    renderCategoryOptions("General");
     setupSignaturePad("requestSignatureCanvas", "requestSignatureData");
     setupSignaturePad("ticketDriverSignatureCanvas", "ticketDriverSignature");
     setupSignaturePad("ticketCustomerSignatureCanvas", "ticketCustomerSignature");
