@@ -700,13 +700,17 @@
     #partsReportModal .photo-catalog-table th:nth-child(5) { width: 70px; }
     #partsReportModal .photo-catalog-table th:nth-child(6),
     #partsReportModal .photo-catalog-table th:nth-child(7) { width: 105px; }
-    #partsReportModal .photo-catalog-table .parts-report-category th {
+    #partsReportModal .parts-report-category th {
       width: auto;
       background: var(--green);
       color: #fff;
       font-size: 14px;
       padding: 9px 12px;
       text-transform: none;
+    }
+    #partsReportModal .parts-report-subtotal td {
+      background: #edf4ef;
+      font-weight: 700;
     }
 
     .photo-preview {
@@ -3524,35 +3528,44 @@
           && (!from || request.requestDate >= from)
           && (!to || request.requestDate <= to)
           && (!search || `${request.jobsite || ""} ${line.itemName || ""} ${line.sku || ""}`.toLowerCase().includes(search)));
+        issuanceRows.sort((a, b) => String(a.request.jobsite || "Unassigned").localeCompare(String(b.request.jobsite || "Unassigned"))
+          || String(b.request.requestDate || "").localeCompare(String(a.request.requestDate || ""))
+          || String(a.line.itemName || "").localeCompare(String(b.line.itemName || "")));
         const grouped = new Map();
         issuanceRows.forEach(row => {
           const key = row.request.jobsite || "Unassigned";
-          const current = grouped.get(key) || { key, lines: 0, itemIds: new Set(), quantity: 0, total: 0, missing: 0, firstDate: "", lastDate: "" };
-          current.lines += 1;
-          current.itemIds.add(row.line.itemId || row.line.sku || row.line.itemName || `line-${current.lines}`);
-          current.quantity += Number(row.line.quantity || 0);
-          if (row.totalCost === null) current.missing += 1; else current.total += row.totalCost;
-          const date = String(row.request.requestDate || "");
-          if (date && (!current.firstDate || date < current.firstDate)) current.firstDate = date;
-          if (date && (!current.lastDate || date > current.lastDate)) current.lastDate = date;
-          grouped.set(key, current);
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(row);
         });
-        const summary = [...grouped.values()].sort((a, b) => b.total - a.total || String(a.key).localeCompare(String(b.key)));
-        const totalQuantity = summary.reduce((sum, row) => sum + row.quantity, 0);
-        const totalIssuance = summary.reduce((sum, row) => sum + row.total, 0);
-        const missingCost = summary.reduce((sum, row) => sum + row.missing, 0);
+        const reportRows = [];
+        [...grouped.entries()].forEach(([jobsite, rows]) => {
+          rows.forEach((row, index) => reportRows.push({
+            groupLabel: index === 0 ? jobsite : "",
+            csv: [jobsite, row.request.requestDate, row.line.itemName, row.line.sku, Number(row.line.quantity || 0), row.line.unit, row.unitCost === null ? "" : row.unitCost.toFixed(2), row.totalCost === null ? "" : row.totalCost.toFixed(2), row.request.requestedBy, row.request.approvedBy, row.request.poNumber],
+            display: [row.request.requestDate, row.line.itemName, row.line.sku, Number(row.line.quantity || 0), row.line.unit, row.unitCost === null ? "N/A" : formatMoney(row.unitCost), row.totalCost === null ? "N/A" : formatMoney(row.totalCost), row.request.requestedBy, row.request.approvedBy, row.request.poNumber].map(value => escapeHtml(value))
+          }));
+          const jobsiteQuantity = rows.reduce((sum, row) => sum + Number(row.line.quantity || 0), 0);
+          const jobsiteTotal = rows.filter(row => row.totalCost !== null).reduce((sum, row) => sum + row.totalCost, 0);
+          const missing = rows.filter(row => row.totalCost === null).length;
+          reportRows.push({
+            subtotal: true,
+            csv: [jobsite, "JOB SITE TOTAL", "", "", jobsiteQuantity, "", "", jobsiteTotal.toFixed(2), "", "", missing ? `${missing} line(s) without cost` : ""],
+            display: ["", `<strong>Jobsite Total</strong>`, "", `<strong>${jobsiteQuantity}</strong>`, "", "", `<strong>${escapeHtml(formatMoney(jobsiteTotal))}</strong>`, "", "", missing ? `${missing} without cost` : ""]
+          });
+        });
+        const totalQuantity = issuanceRows.reduce((sum, row) => sum + Number(row.line.quantity || 0), 0);
+        const totalIssuance = issuanceRows.filter(row => row.totalCost !== null).reduce((sum, row) => sum + row.totalCost, 0);
+        const missingCost = issuanceRows.filter(row => row.totalCost === null).length;
         return {
           title: "Issuance Report by Jobsite",
           format,
           items,
-          sourceRows: summary,
-          summary: `${summary.length} jobsite${summary.length === 1 ? "" : "s"} · ${issuanceRows.length} issuance line${issuanceRows.length === 1 ? "" : "s"} · ${totalQuantity} total quantity · ${formatMoney(totalIssuance)} total issuance${missingCost ? ` · ${missingCost} without cost` : ""}`,
-          printMeta: `${summary.length} jobsites · ${issuanceRows.length} issuance lines · Total issuance ${formatMoney(totalIssuance)}`,
-          headers: ["Jobsite", "Issuance Lines", "Distinct Items", "Total Quantity", "Total Issuance Value", "Lines Without Cost", "First Issuance", "Last Issuance"],
-          rows: summary.map(row => ({
-            csv: [row.key, row.lines, row.itemIds.size, row.quantity, row.total.toFixed(2), row.missing, row.firstDate, row.lastDate],
-            display: [escapeHtml(row.key), row.lines, row.itemIds.size, row.quantity, formatMoney(row.total), row.missing, escapeHtml(row.firstDate), escapeHtml(row.lastDate)]
-          }))
+          sourceRows: issuanceRows,
+          summary: `${grouped.size} jobsite${grouped.size === 1 ? "" : "s"} · ${issuanceRows.length} issuance line${issuanceRows.length === 1 ? "" : "s"} · ${totalQuantity} total quantity · ${formatMoney(totalIssuance)} total issuance${missingCost ? ` · ${missingCost} without cost` : ""}`,
+          printMeta: `${grouped.size} jobsites · ${issuanceRows.length} issuance lines · Total issuance ${formatMoney(totalIssuance)}`,
+          headers: ["Date", "Item", "Part #", "Qty", "Unit", "Unit Cost", "Line Total", "Requested By", "Approved By", "PO #"],
+          csvHeaders: ["Jobsite", "Date", "Item", "Part #", "Qty", "Unit", "Unit Cost", "Line Total", "Requested By", "Approved By", "PO # / Notes"],
+          rows: reportRows
         };
       }
       if (format === "reconciliation") {
@@ -3701,11 +3714,12 @@
       $("partsReportHead").innerHTML = `<tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
       let currentCategory = null;
       $("partsReportRows").innerHTML = view.rows.map(row => {
-        const categoryHeading = view.format === "photo" && row.category !== currentCategory
-          ? `<tr class="parts-report-category"><th colspan="${view.headers.length}">${escapeHtml(row.category)}</th></tr>`
+        const groupLabel = view.format === "photo" ? row.category : row.groupLabel;
+        const categoryHeading = groupLabel && groupLabel !== currentCategory
+          ? `<tr class="parts-report-category"><th colspan="${view.headers.length}">${escapeHtml(groupLabel)}</th></tr>`
           : "";
-        if (view.format === "photo") currentCategory = row.category;
-        return `${categoryHeading}<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`;
+        if (groupLabel) currentCategory = groupLabel;
+        return `${categoryHeading}<tr${row.subtotal ? ' class="parts-report-subtotal"' : ""}>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`;
       }).join("") || `<tr><td colspan="${view.headers.length}" class="empty">No parts match these report filters.</td></tr>`;
     }
 
@@ -3751,13 +3765,14 @@
       if (!popup) return alert("Allow pop-ups to create the Parts report PDF.");
       let currentCategory = null;
       const tableRows = view.rows.map(row => {
-        const categoryHeading = view.format === "photo" && row.category !== currentCategory
-          ? `<tr class="category-heading"><th colspan="${view.headers.length}">${escapeHtml(row.category)}</th></tr>`
+        const groupLabel = view.format === "photo" ? row.category : row.groupLabel;
+        const categoryHeading = groupLabel && groupLabel !== currentCategory
+          ? `<tr class="category-heading"><th colspan="${view.headers.length}">${escapeHtml(groupLabel)}</th></tr>`
           : "";
-        if (view.format === "photo") currentCategory = row.category;
-        return `${categoryHeading}<tr>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`;
+        if (groupLabel) currentCategory = groupLabel;
+        return `${categoryHeading}<tr${row.subtotal ? ' class="subtotal"' : ""}>${row.display.map(value => `<td>${value}</td>`).join("")}</tr>`;
       }).join("");
-      const photoCss = view.format === "photo" ? `.report-photo{width:68px;height:68px;object-fit:contain;display:block}.photo-placeholder{display:grid;place-items:center;background:#edf2ed;color:#667;font-size:7px;font-weight:bold}.category-heading th{background:#1f684e;color:#fff;font-size:11px;padding:7px;text-transform:none}.category-heading{break-after:avoid;page-break-after:avoid}td:nth-child(1){width:74px}td:nth-child(3){width:42%;font-size:10px}td:nth-child(4),td:nth-child(5),td:nth-child(6),td:nth-child(7){white-space:nowrap}` : `td:nth-child(2){min-width:140px}`;
+      const photoCss = view.format === "photo" ? `.report-photo{width:68px;height:68px;object-fit:contain;display:block}.photo-placeholder{display:grid;place-items:center;background:#edf2ed;color:#667;font-size:7px;font-weight:bold}.category-heading th{background:#1f684e;color:#fff;font-size:11px;padding:7px;text-transform:none}.category-heading{break-after:avoid;page-break-after:avoid}td:nth-child(1){width:74px}td:nth-child(3){width:42%;font-size:10px}td:nth-child(4),td:nth-child(5),td:nth-child(6),td:nth-child(7){white-space:nowrap}` : `.category-heading th{background:#1f684e;color:#fff;font-size:11px;padding:7px;text-transform:none}.category-heading{break-after:avoid;page-break-after:avoid}.subtotal td{background:#edf4ef;font-weight:bold}td:nth-child(2){min-width:140px}`;
       const reportHeading = view.format === "photo" ? "LMS MALL LOT INVENTORY" : `LMS ${escapeHtml(view.title).toUpperCase()}`;
       const reportMeta = `Prepared ${escapeHtml(new Date().toLocaleString())} · ${escapeHtml(view.printMeta || `${view.items.length} parts`)} · ${paperLabel} · ${orientation[0].toUpperCase() + orientation.slice(1)}`;
       popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:${pageDimensions};margin:.3in}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px;color:#1f684e}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}th,td{border:1px solid #bac5bc;padding:5px;font-size:${tableFontSize};vertical-align:middle;overflow-wrap:anywhere}th{background:#e9f0eb;text-align:left;text-transform:uppercase}tr{break-inside:avoid;page-break-inside:avoid}${photoCss}</style></head><body><h1>${reportHeading}</h1><div class="meta">${reportMeta}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),800));<\/script></body></html>`);
