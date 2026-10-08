@@ -1609,7 +1609,7 @@
       <div class="modal-head"><h2>Requests Report</h2><button type="button" class="icon-btn" id="closeRequestReportBtn">X</button></div>
       <div class="modal-body">
         <div class="form-grid">
-          <label class="span-2">Report Type<select id="requestReportFormat"><option value="detail">Detailed Transactions</option><option value="item">Summary by Item</option><option value="jobsite">Summary by Jobsite</option><option value="requester">Summary by Requested By</option><option value="company">Summary by Company</option></select></label>
+          <label class="span-2">Report Type<select id="requestReportFormat"><option value="detail">Detailed Transactions</option><option value="issuance_jobsite">Issuance Report by Jobsite</option><option value="item">Summary by Item</option><option value="jobsite">Summary by Jobsite</option><option value="requester">Summary by Requested By</option><option value="company">Summary by Company</option></select></label>
           <label>From Date<input id="requestReportFrom" type="date"></label>
           <label>To Date<input id="requestReportTo" type="date"></label>
           <label>Status<select id="requestReportStatus"><option value="">All</option><option>Pending</option><option>Approved</option><option>Denied</option></select></label>
@@ -1630,7 +1630,7 @@
       <div class="modal-head"><h2>Parts Performance Report</h2><button type="button" class="icon-btn" id="closePartsReportBtn">X</button></div>
       <div class="modal-body">
         <div class="form-grid">
-          <label class="span-2">Report Type<select id="partsReportFormat"><option value="inventory">Inventory Value &amp; Stock Status</option><option value="reconciliation">Inventory Reconciliation</option><option value="quality">Data Quality / Missing Information</option><option value="photo">Photo Catalog by Category</option><option value="velocity">Fast / Slow / No Movement</option><option value="movement">Stock Movement Detail</option><option value="category">Summary by Category</option><option value="supplier">Summary by Supplier</option><option value="location">Summary by Location</option></select></label>
+          <label class="span-2">Report Type<select id="partsReportFormat"><option value="inventory">Inventory Value &amp; Stock Status</option><option value="issuance_jobsite">Issuance Report by Jobsite</option><option value="reconciliation">Inventory Reconciliation</option><option value="quality">Data Quality / Missing Information</option><option value="photo">Photo Catalog by Category</option><option value="velocity">Fast / Slow / No Movement</option><option value="movement">Stock Movement Detail</option><option value="category">Summary by Category</option><option value="supplier">Summary by Supplier</option><option value="location">Summary by Location</option></select></label>
           <label>From Date<input id="partsReportFrom" type="date"></label>
           <label>To Date<input id="partsReportTo" type="date"></label>
           <label>Category<select id="partsReportCategory"></select></label>
@@ -3341,6 +3341,8 @@
     }
 
     function requestReportData() {
+      const format = $("requestReportFormat")?.value || "detail";
+      const issuanceOnly = format === "issuance_jobsite";
       const from = $("requestReportFrom")?.value || "";
       const to = $("requestReportTo")?.value || "";
       const status = $("requestReportStatus")?.value || "";
@@ -3353,12 +3355,14 @@
         return { request, line, unitCost, totalCost: unitCost === null ? null : unitCost * Number(line.quantity || 0) };
       })).filter(({ request, line }) => (!from || request.requestDate >= from)
         && (!to || request.requestDate <= to)
-        && (!status || request.status === status)
-        && (!type || request.requestType === type)
+        && (issuanceOnly ? request.status === "Approved" : (!status || request.status === status))
+        && (issuanceOnly ? request.requestType === "Issued Permanently" : (!type || request.requestType === type))
         && (!jobsite || String(request.jobsite || "").toLowerCase().includes(jobsite))
         && (!company || String(request.company || "").toLowerCase().includes(company))
         && (!itemSearch || `${line.itemName || ""} ${line.sku || ""}`.toLowerCase().includes(itemSearch)))
-        .sort((a, b) => String(b.request.requestDate || "").localeCompare(String(a.request.requestDate || "")));
+        .sort((a, b) => issuanceOnly
+          ? String(a.request.jobsite || "Unassigned").localeCompare(String(b.request.jobsite || "Unassigned")) || String(b.request.requestDate || "").localeCompare(String(a.request.requestDate || ""))
+          : String(b.request.requestDate || "").localeCompare(String(a.request.requestDate || "")));
     }
 
     function renderRequestReport() {
@@ -3374,6 +3378,30 @@
 
     function requestReportView(rows = requestReportData()) {
       const format = $("requestReportFormat")?.value || "detail";
+      if (format === "issuance_jobsite") {
+        const grouped = new Map();
+        rows.forEach(row => {
+          const key = row.request.jobsite || "Unassigned";
+          const current = grouped.get(key) || { key, lines: 0, itemIds: new Set(), quantity: 0, total: 0, missing: 0, firstDate: "", lastDate: "" };
+          current.lines += 1;
+          current.itemIds.add(row.line.itemId || row.line.sku || row.line.itemName || `line-${current.lines}`);
+          current.quantity += Number(row.line.quantity || 0);
+          if (row.totalCost === null) current.missing += 1; else current.total += row.totalCost;
+          const date = String(row.request.requestDate || "");
+          if (date && (!current.firstDate || date < current.firstDate)) current.firstDate = date;
+          if (date && (!current.lastDate || date > current.lastDate)) current.lastDate = date;
+          grouped.set(key, current);
+        });
+        const summary = [...grouped.values()].sort((a, b) => b.total - a.total || String(a.key).localeCompare(String(b.key)));
+        return {
+          title: "Issuance Report by Jobsite",
+          headers: ["Jobsite", "Issuance Lines", "Distinct Items", "Total Quantity", "Total Issuance Value", "Lines Without Cost", "First Issuance", "Last Issuance"],
+          rows: summary.map(row => ({
+            csv: [row.key, row.lines, row.itemIds.size, row.quantity, row.total.toFixed(2), row.missing, row.firstDate, row.lastDate],
+            display: [escapeHtml(row.key), row.lines, row.itemIds.size, row.quantity, formatMoney(row.total), row.missing, escapeHtml(row.firstDate), escapeHtml(row.lastDate)]
+          }))
+        };
+      }
       if (format === "detail") return {
         title: "Detailed Request Transactions",
         headers: ["Date","Status","Type","Item","SKU","Qty","Unit","Unit Cost","Total Cost","Location","Jobsite","Requested By","Approved By","Company","PO #"],
@@ -3483,6 +3511,49 @@
     function partsReportView() {
       const format = $("partsReportFormat")?.value || "inventory";
       const items = partsReportFilters();
+      if (format === "issuance_jobsite") {
+        const from = $("partsReportFrom")?.value || "";
+        const to = $("partsReportTo")?.value || "";
+        const search = $("partsReportSearch")?.value.trim().toLowerCase() || "";
+        const issuanceRows = state.requests.flatMap(request => requestLines(request).map(line => {
+          const unitCost = requestLineCost(line);
+          return { request, line, unitCost, totalCost: unitCost === null ? null : unitCost * Number(line.quantity || 0) };
+        })).filter(({ request, line }) => request.status === "Approved"
+          && request.requestType === "Issued Permanently"
+          && (!from || request.requestDate >= from)
+          && (!to || request.requestDate <= to)
+          && (!search || `${request.jobsite || ""} ${line.itemName || ""} ${line.sku || ""}`.toLowerCase().includes(search)));
+        const grouped = new Map();
+        issuanceRows.forEach(row => {
+          const key = row.request.jobsite || "Unassigned";
+          const current = grouped.get(key) || { key, lines: 0, itemIds: new Set(), quantity: 0, total: 0, missing: 0, firstDate: "", lastDate: "" };
+          current.lines += 1;
+          current.itemIds.add(row.line.itemId || row.line.sku || row.line.itemName || `line-${current.lines}`);
+          current.quantity += Number(row.line.quantity || 0);
+          if (row.totalCost === null) current.missing += 1; else current.total += row.totalCost;
+          const date = String(row.request.requestDate || "");
+          if (date && (!current.firstDate || date < current.firstDate)) current.firstDate = date;
+          if (date && (!current.lastDate || date > current.lastDate)) current.lastDate = date;
+          grouped.set(key, current);
+        });
+        const summary = [...grouped.values()].sort((a, b) => b.total - a.total || String(a.key).localeCompare(String(b.key)));
+        const totalQuantity = summary.reduce((sum, row) => sum + row.quantity, 0);
+        const totalIssuance = summary.reduce((sum, row) => sum + row.total, 0);
+        const missingCost = summary.reduce((sum, row) => sum + row.missing, 0);
+        return {
+          title: "Issuance Report by Jobsite",
+          format,
+          items,
+          sourceRows: summary,
+          summary: `${summary.length} jobsite${summary.length === 1 ? "" : "s"} · ${issuanceRows.length} issuance line${issuanceRows.length === 1 ? "" : "s"} · ${totalQuantity} total quantity · ${formatMoney(totalIssuance)} total issuance${missingCost ? ` · ${missingCost} without cost` : ""}`,
+          printMeta: `${summary.length} jobsites · ${issuanceRows.length} issuance lines · Total issuance ${formatMoney(totalIssuance)}`,
+          headers: ["Jobsite", "Issuance Lines", "Distinct Items", "Total Quantity", "Total Issuance Value", "Lines Without Cost", "First Issuance", "Last Issuance"],
+          rows: summary.map(row => ({
+            csv: [row.key, row.lines, row.itemIds.size, row.quantity, row.total.toFixed(2), row.missing, row.firstDate, row.lastDate],
+            display: [escapeHtml(row.key), row.lines, row.itemIds.size, row.quantity, formatMoney(row.total), row.missing, escapeHtml(row.firstDate), escapeHtml(row.lastDate)]
+          }))
+        };
+      }
       if (format === "reconciliation") {
         const rows = items.map(item => {
           const movements = (item.movements || []).filter(movement => {
@@ -3622,9 +3693,9 @@
       const value = items.reduce((sum, item) => sum + totalValue(item), 0);
       const missingCost = items.filter(item => !(Number(item.unitCost || 0) > 0)).length;
       const photoSummary = view.format === "photo" ? ` · ${items.filter(item => item.photoData).length} with photos` : "";
-      $("partsReportSummary").textContent = view.format === "photo"
+      $("partsReportSummary").textContent = view.summary || (view.format === "photo"
         ? `${items.length} part${items.length === 1 ? "" : "s"} · ${quantity.toFixed(2)} total on hand${missingCost ? ` · ${missingCost} without cost` : ""}${photoSummary} · ${view.sourceRows.length} report row${view.sourceRows.length === 1 ? "" : "s"}`
-        : `${items.length} part${items.length === 1 ? "" : "s"} · ${quantity.toFixed(2)} total on hand · ${formatMoney(value)} inventory value${missingCost ? ` · ${missingCost} without cost` : ""}${photoSummary} · ${view.sourceRows.length} report row${view.sourceRows.length === 1 ? "" : "s"}`;
+        : `${items.length} part${items.length === 1 ? "" : "s"} · ${quantity.toFixed(2)} total on hand · ${formatMoney(value)} inventory value${missingCost ? ` · ${missingCost} without cost` : ""}${photoSummary} · ${view.sourceRows.length} report row${view.sourceRows.length === 1 ? "" : "s"}`);
       $("partsReportHead").closest("table").classList.toggle("photo-catalog-table", view.format === "photo");
       $("partsReportHead").innerHTML = `<tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
       let currentCategory = null;
@@ -3687,7 +3758,7 @@
       }).join("");
       const photoCss = view.format === "photo" ? `.report-photo{width:68px;height:68px;object-fit:contain;display:block}.photo-placeholder{display:grid;place-items:center;background:#edf2ed;color:#667;font-size:7px;font-weight:bold}.category-heading th{background:#1f684e;color:#fff;font-size:11px;padding:7px;text-transform:none}.category-heading{break-after:avoid;page-break-after:avoid}td:nth-child(1){width:74px}td:nth-child(3){width:42%;font-size:10px}td:nth-child(4),td:nth-child(5),td:nth-child(6),td:nth-child(7){white-space:nowrap}` : `td:nth-child(2){min-width:140px}`;
       const reportHeading = view.format === "photo" ? "LMS MALL LOT INVENTORY" : `LMS ${escapeHtml(view.title).toUpperCase()}`;
-      const reportMeta = `Prepared ${escapeHtml(new Date().toLocaleString())} · ${view.items.length} parts · ${paperLabel} · ${orientation[0].toUpperCase() + orientation.slice(1)}`;
+      const reportMeta = `Prepared ${escapeHtml(new Date().toLocaleString())} · ${escapeHtml(view.printMeta || `${view.items.length} parts`)} · ${paperLabel} · ${orientation[0].toUpperCase() + orientation.slice(1)}`;
       popup.document.write(`<!doctype html><html><head><title>${escapeHtml(view.title)}</title><style>@page{size:${pageDimensions};margin:.3in}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;color:#111}h1{margin:0 0 5px;color:#1f684e}.meta{color:#555;margin-bottom:14px}table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}th,td{border:1px solid #bac5bc;padding:5px;font-size:${tableFontSize};vertical-align:middle;overflow-wrap:anywhere}th{background:#e9f0eb;text-align:left;text-transform:uppercase}tr{break-inside:avoid;page-break-inside:avoid}${photoCss}</style></head><body><h1>${reportHeading}</h1><div class="meta">${reportMeta}</div><table><thead><tr>${view.headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><script>addEventListener("load",()=>setTimeout(()=>print(),800));<\/script></body></html>`);
       popup.document.close();
     }
