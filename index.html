@@ -1814,7 +1814,7 @@
         localStorage.setItem(storageKey, JSON.stringify(state.items));
       }
       if (state.requests.length !== beforeRequests) {
-        localStorage.setItem(requestsKey, JSON.stringify(state.requests));
+        cacheRequestsLocally();
       }
     }
 
@@ -1925,14 +1925,36 @@
 
     function saveRequests(options = {}) {
       const shouldSync = options.sync !== false;
-      try {
-        localStorage.setItem(requestsKey, JSON.stringify(state.requests));
-      } catch {
-        const slimRequests = state.requests.map(request => ({ ...request, photoData: "" }));
-        try { localStorage.setItem(requestsKey, JSON.stringify(slimRequests)); } catch {}
-      }
+      cacheRequestsLocally();
       render();
       if (shouldSync) scheduleSupabaseSync();
+    }
+
+    function slimRequestForLocalCache(request = {}) {
+      return {
+        ...request,
+        photoData: "",
+        signatureData: "",
+        poFileData: "",
+        poUploadData: "",
+        purchaseOrderData: ""
+      };
+    }
+
+    function cacheRequestsLocally() {
+      try {
+        localStorage.setItem(requestsKey, JSON.stringify(state.requests));
+        return true;
+      } catch {
+        try {
+          localStorage.setItem(requestsKey, JSON.stringify(state.requests.map(slimRequestForLocalCache)));
+          $("syncStatus").textContent = "Requests loaded online";
+          $("syncDetail").textContent = "Browser storage is full, so large request files remain in Supabase instead of the local cache.";
+          return true;
+        } catch {
+          return false;
+        }
+      }
     }
 
     function saveGreenwasteTickets(options = {}) {
@@ -3334,7 +3356,7 @@
           ...state.requests.filter(request => !request.id || !onlineRequestIds.has(request.id)),
           ...onlineRequests
         ].sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
-        localStorage.setItem(requestsKey, JSON.stringify(state.requests));
+        cacheRequestsLocally();
         renderRequests();
       } catch (error) {
         $("syncStatus").textContent = "Request refresh failed";
@@ -5169,7 +5191,7 @@
           if (!Array.isArray(items)) throw new Error("No items array found");
           state.items = items.map(item => ({...item, id: item.id || crypto.randomUUID(), movements: item.movements || []}));
           state.requests = Array.isArray(data.requests) ? data.requests.map(request => ({...request, id: request.id || crypto.randomUUID()})) : state.requests;
-          localStorage.setItem(requestsKey, JSON.stringify(state.requests));
+          cacheRequestsLocally();
           saveItems();
         } catch (error) {
           alert("Import failed: " + error.message);
@@ -5923,7 +5945,7 @@
         rememberSyncCursor(itemSyncCursorKey, data || [], state.items);
         rememberSyncCursor(requestSyncCursorKey, requestData || [], state.requests);
         rememberSyncCursor(greenwasteSyncCursorKey, greenwasteData || [], state.greenwasteTickets);
-        localStorage.setItem(requestsKey, JSON.stringify(state.requests));
+        cacheRequestsLocally();
         localStorage.setItem(greenwasteTicketsKey, JSON.stringify(state.greenwasteTickets));
         saveItems({ sync: false });
         $("syncStatus").textContent = options.auto ? "Low-egress Supabase sync active" : "Loaded from Supabase";
@@ -6278,7 +6300,7 @@
         state.items = [];
         state.requests = [];
         state.greenwasteTickets = [];
-        localStorage.setItem(requestsKey, JSON.stringify(state.requests));
+        cacheRequestsLocally();
         localStorage.setItem(greenwasteTicketsKey, JSON.stringify(state.greenwasteTickets));
         saveItems({ sync: false });
         $("syncStatus").textContent = "Local data cleared";
