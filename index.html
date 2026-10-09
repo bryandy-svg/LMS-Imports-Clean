@@ -1216,7 +1216,7 @@
             </div>
             <div class="panel-body">
               <div class="table-wrap"><table class="ticket-table"><thead><tr>
-                <th>Actions</th><th>Status</th><th>Type</th><th>Date</th><th>Item</th><th>SKU</th><th>Qty</th><th>Unit</th><th>Unit Cost</th><th>Total Cost</th><th>Location</th><th>Jobsite</th><th>Requested By</th><th>Approved By</th><th>Signer</th><th>PO #</th><th>Company</th><th>Return Date</th><th>PO Upload</th><th>Notes</th>
+                <th>Actions</th><th>Document #</th><th>Photo</th><th>Status</th><th>Type</th><th>Date</th><th>Item</th><th>SKU</th><th>Qty</th><th>Unit</th><th>Unit Cost</th><th>Total Cost</th><th>Location</th><th>Jobsite</th><th>Requested By</th><th>Approved By</th><th>Signer</th><th>PO #</th><th>Company</th><th>Return Date</th><th>PO Upload</th><th>Notes</th>
               </tr></thead><tbody id="requestList"></tbody></table></div>
             </div>
           </section>
@@ -1542,6 +1542,7 @@
             <button type="button" id="addRequestItemBtn">Add Another Item</button>
           </div>
           <label>Type<select id="requestType"><option>Borrowed</option><option>Issued Permanently</option></select></label>
+          <label>Document #<input id="requestDocumentNumber" readonly placeholder="Assigned when saved"></label>
           <label>Date Borrowed / Issued<input id="requestDate" type="date" required></label>
           <label>Jobsite<input id="requestJobsite" placeholder="Jobsite or project"></label>
           <label>Requested By<input id="requestRequestedBy" required placeholder="Requester name"></label>
@@ -1572,6 +1573,7 @@
         </div>
         <div class="modal-actions">
           <button type="button" id="deleteRequestBtn" class="danger">Delete</button>
+          <button type="button" id="printIssuanceFormBtn">Print Issuance Form</button>
           <button class="primary" type="submit">Save Request</button>
         </div>
       </div>
@@ -3337,12 +3339,67 @@
         return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
       });
       const rows = requests.flatMap(request => requestLines(request).map(line => requestRegisterRow(request, line)));
-      $("requestList").innerHTML = rows.length ? rows.join("") : `<tr><td colspan="20" class="empty">No ${requestStatusTab.toLowerCase()} requests.</td></tr>`;
+      $("requestList").innerHTML = rows.length ? rows.join("") : `<tr><td colspan="22" class="empty">No ${requestStatusTab.toLowerCase()} requests.</td></tr>`;
+    }
+
+    function requestDocumentNumber(request = {}) {
+      if (request.documentNumber) return request.documentNumber;
+      const date = String(request.requestDate || request.createdAt || todayIso()).slice(0, 10).replaceAll("-", "");
+      const suffix = String(request.id || "NEW").replace(/[^a-z0-9]/gi, "").slice(-6).toUpperCase().padStart(6, "0");
+      return `MLI-${date}-${suffix}`;
+    }
+
+    function printIssuanceForm(requestId) {
+      const request = state.requests.find(record => record.id === requestId);
+      if (!request) {
+        alert("Save the request before printing the issuance form.");
+        return;
+      }
+      const lines = requestLines(request);
+      const documentNumber = requestDocumentNumber(request);
+      const totals = lines.reduce((summary, line) => {
+        const unitCost = requestLineCost(line);
+        summary.quantity += Number(line.quantity || 0);
+        if (unitCost !== null) summary.cost += unitCost * Number(line.quantity || 0);
+        return summary;
+      }, { quantity: 0, cost: 0 });
+      const rows = lines.map(line => {
+        const item = state.items.find(record => record.id === line.itemId);
+        const unitCost = requestLineCost(line);
+        const lineTotal = unitCost === null ? null : unitCost * Number(line.quantity || 0);
+        const photo = item?.photoData || request.photoData || "";
+        return `<tr>
+          <td class="photo-cell">${photo ? `<img src="${photo}" alt="${escapeHtml(line.itemName || "Item")} photo">` : `<span class="no-photo">No photo</span>`}</td>
+          <td><strong>${escapeHtml(line.itemName || "Unknown item")}</strong></td>
+          <td>${escapeHtml(line.sku || "")}</td>
+          <td class="number">${Number(line.quantity || 0)}</td>
+          <td>${escapeHtml(line.unit || "")}</td>
+          <td class="number">${unitCost === null ? "N/A" : formatMoney(unitCost)}</td>
+          <td class="number">${lineTotal === null ? "N/A" : formatMoney(lineTotal)}</td>
+          <td>${escapeHtml(line.locationName || "")}</td>
+        </tr>`;
+      }).join("");
+      const details = [
+        ["Document #", documentNumber], ["Status", request.status || "Pending"],
+        ["Type", request.requestType], ["Date", request.requestDate],
+        ["Jobsite", request.jobsite], ["Company", request.company],
+        ["Requested By", request.requestedBy], ["Approved By", request.approvedBy],
+        ["PO #", request.poNumber], ["Return Date", request.returnDate]
+      ].filter(([, value]) => value).map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+      const popup = window.open("", "_blank");
+      if (!popup) {
+        alert("Please allow pop-ups to print the issuance form.");
+        return;
+      }
+      popup.document.write(`<!doctype html><html><head><title>${escapeHtml(documentNumber)} - Issuance Form</title><style>
+        @page{size:letter landscape;margin:.35in}*{box-sizing:border-box}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;color:#17211b;margin:0}h1{margin:0;color:#1f684e;font-size:24px}.subtitle{margin:3px 0 14px;color:#59645e}.details{display:grid;grid-template-columns:repeat(5,1fr);border:1px solid #aebbb3;margin-bottom:14px}.details div{padding:7px 9px;border-right:1px solid #d3ddd6;border-bottom:1px solid #d3ddd6}.details span{display:block;font-size:9px;text-transform:uppercase;color:#59645e;margin-bottom:2px}.details strong{font-size:11px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #aebbb3;padding:6px;font-size:10px;vertical-align:middle;overflow-wrap:anywhere}th{background:#e9f0eb;text-align:left;text-transform:uppercase}.photo-cell{width:78px;text-align:center}.photo-cell img{display:block;width:64px;height:54px;object-fit:contain;margin:auto}.no-photo{color:#777;font-size:9px}.number{text-align:right}.totals{text-align:right;font-weight:bold;margin-top:9px}.notes{border:1px solid #aebbb3;padding:8px;margin-top:12px;min-height:42px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:30px}.signature{border-top:1px solid #333;padding-top:5px;font-size:10px}.saved-signature{height:45px;max-width:220px;object-fit:contain;display:block;margin-bottom:-1px}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}
+      </style></head><body><h1>LMS Mall Lot Inventory</h1><div class="subtitle">${escapeHtml(request.requestType || "Inventory")} Form</div><div class="details">${details}</div><table><thead><tr><th class="photo-cell">Photo</th><th style="width:25%">Item</th><th>Part / SKU</th><th>Qty</th><th>Unit</th><th>Unit Cost</th><th>Total Cost</th><th style="width:22%">From Location</th></tr></thead><tbody>${rows}</tbody></table><div class="totals">${lines.length} item line${lines.length === 1 ? "" : "s"} · ${totals.quantity} total quantity · ${formatMoney(totals.cost)} total cost</div>${request.notes ? `<div class="notes"><strong>Notes:</strong> ${escapeHtml(request.notes)}</div>` : ""}<div class="signatures"><div>${request.signatureData ? `<img class="saved-signature" src="${request.signatureData}" alt="Saved signature">` : ""}<div class="signature">Issued / Requested By: ${escapeHtml(request.signatureName || request.requestedBy || "")}</div></div><div><div style="height:45px"></div><div class="signature">Approved By: ${escapeHtml(request.approvedBy || "")}</div></div></div><script>addEventListener("load",()=>setTimeout(()=>print(),800));<\/script></body></html>`);
+      popup.document.close();
     }
 
     async function refreshRequestsRegister() {
       if (!settings.supabaseUrl || !settings.supabaseKey) return;
-      if (state.view === "requests") $("requestList").innerHTML = `<tr><td colspan="20" class="empty">Loading requests from Supabase…</td></tr>`;
+      if (state.view === "requests") $("requestList").innerHTML = `<tr><td colspan="22" class="empty">Loading requests from Supabase…</td></tr>`;
       try {
         const client = await getSupabase();
         const { data, error } = await client.from(settings.requestTable).select("payload,updated_at").order("updated_at", { ascending: false });
@@ -3361,7 +3418,7 @@
       } catch (error) {
         $("syncStatus").textContent = "Request refresh failed";
         $("syncDetail").textContent = error.message;
-        if (state.view === "requests") $("requestList").innerHTML = `<tr><td colspan="20" class="empty">Could not load requests: ${escapeHtml(error.message)}</td></tr>`;
+        if (state.view === "requests") $("requestList").innerHTML = `<tr><td colspan="22" class="empty">Could not load requests: ${escapeHtml(error.message)}</td></tr>`;
       }
     }
 
@@ -3379,13 +3436,17 @@
     function requestRegisterRow(request, line) {
       const cost = requestLineCost(line);
       const total = cost === null ? null : cost * Number(line.quantity || 0);
+      const item = state.items.find(record => record.id === line.itemId);
+      const photo = item?.photoData || request.photoData || "";
       const poFile = requestPoFile(request);
       const actions = request.status === "Pending"
-        ? `<button class="primary action-btn" onclick="approveRequest('${request.id}')">Approve</button><button class="danger action-btn" onclick="denyRequest('${request.id}')">Deny</button><button class="action-btn" onclick="openRequest('${request.id}')">Edit</button>`
-        : `<button class="action-btn" onclick="openRequest('${request.id}')">Open</button>`;
+        ? `<button class="primary action-btn" onclick="approveRequest('${request.id}')">Approve</button><button class="danger action-btn" onclick="denyRequest('${request.id}')">Deny</button><button class="action-btn" onclick="openRequest('${request.id}')">Edit</button><button class="action-btn" onclick="printIssuanceForm('${request.id}')">Print Form</button>`
+        : `<button class="action-btn" onclick="openRequest('${request.id}')">Open</button><button class="action-btn" onclick="printIssuanceForm('${request.id}')">Print Form</button>`;
       const poLink = poFile.data ? `<a class="button-link" href="${poFile.data}" target="_blank" rel="noopener" download="${escapeHtml(poFile.name || "purchase-order")}">Open PO</a>` : "";
       return `<tr>
         <td><div class="toolbar">${actions}</div></td>
+        <td><strong>${escapeHtml(requestDocumentNumber(request))}</strong></td>
+        <td>${photo ? `<img class="photo-thumb" src="${photo}" alt="${escapeHtml(line.itemName || "Item")} photo" data-item-photo-id="${escapeHtml(item?.id || "")}">` : `<div class="photo-thumb photo-placeholder">IMG</div>`}</td>
         <td><span class="pill ${request.status === "Approved" ? "ok" : request.status === "Denied" ? "out" : "low"}">${escapeHtml(request.status || "Pending")}</span></td>
         <td>${escapeHtml(request.requestType || "")}</td><td>${escapeHtml(request.requestDate || "")}</td>
         <td><strong>${escapeHtml(line.itemName || "Unknown item")}</strong></td><td>${escapeHtml(line.sku || "")}</td>
@@ -4064,6 +4125,7 @@
       const selectedId = request?.itemId || defaults.itemId || state.items[0]?.id || "";
       $("requestModalTitle").textContent = request ? "Edit Request" : "New Request";
       $("requestId").value = request?.id || "";
+      $("requestDocumentNumber").value = request ? requestDocumentNumber(request) : "Assigned when saved";
       $("requestType").value = request?.requestType || defaults.requestType || "Borrowed";
       $("requestDate").value = request?.requestDate || todayIso();
       $("requestJobsite").value = request?.jobsite || "";
@@ -4085,6 +4147,7 @@
       renderRequestPhotoPreview();
       updateBorrowedReturnRequirement();
       $("deleteRequestBtn").classList.toggle("hidden", !request);
+      $("printIssuanceFormBtn").classList.toggle("hidden", !request);
       document.body.classList.add("modal-open");
       $("requestModal").classList.add("open");
       loadSignaturePad("requestSignatureCanvas", "requestSignatureData", request?.signatureData || "");
@@ -4095,6 +4158,7 @@
       document.body.classList.remove("modal-open");
       $("requestForm").reset();
       $("requestId").value = "";
+      $("requestDocumentNumber").value = "";
       $("requestPhotoData").value = "";
       $("requestPoFileData").value = "";
       $("requestPoFileName").value = "";
@@ -4704,6 +4768,7 @@
       const existing = state.requests.find(r => r.id === id);
       const request = existing || { id, status: "Pending", createdAt: new Date().toISOString() };
       Object.assign(request, {
+        documentNumber: existing?.documentNumber || requestDocumentNumber({ id, requestDate: $("requestDate").value }),
         items: lines,
         itemId: firstLine.itemId,
         itemName: firstLine.itemName,
@@ -6108,6 +6173,7 @@
       await refreshRequestsRegister();
     }));
     $("requestReportBtn").addEventListener("click", openRequestReport);
+    $("printIssuanceFormBtn").addEventListener("click", () => printIssuanceForm($("requestId").value));
     $("topPartsReportBtn").addEventListener("click", openPartsReport);
     $("sidebarPartsReportBtn").addEventListener("click", openPartsReport);
     $("closeRequestReportBtn").addEventListener("click", closeRequestReport);
