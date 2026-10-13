@@ -3201,26 +3201,50 @@
       const term = state.search.trim().toLowerCase();
       return state.requests
         .filter(request => request.status === "Approved" && request.requestType === wantedType)
-        .flatMap(request => requestLines(request).map(line => ({ request, line, item: state.items.find(item => item.id === line.itemId) })))
+        .flatMap(request => requestLines(request).map((line, lineIndex) => ({ request, line, lineIndex, item: state.items.find(item => item.id === line.itemId) })))
         .filter(({ request, line, item }) => !term || [line.itemName, line.sku, line.locationName, request.jobsite, request.requestedBy, request.approvedBy, request.company, request.poNumber, item?.barcode].some(value => String(value || "").toLowerCase().includes(term)))
         .sort((a, b) => String(b.request.approvedAt || b.request.requestDate || "").localeCompare(String(a.request.approvedAt || a.request.requestDate || "")));
+    }
+
+    function borrowedLineReturnState(request, line, item) {
+      const borrowedQuantity = Math.max(0, Number(line.quantity || 0));
+      const returnedQuantity = Math.min(borrowedQuantity, Math.max(0, Number(line.returnedQuantity || 0)));
+      const hasLineReturnData = Object.prototype.hasOwnProperty.call(line, "returnedQuantity") || Object.prototype.hasOwnProperty.call(line, "returnedDate");
+      const legacyReturned = !hasLineReturnData
+        && Boolean(item?.returnedDate)
+        && String(item.issuePoNumber || "") === String(request.poNumber || "")
+        && String(item.issuedDate || "") === String(request.requestDate || "")
+        && Number(item.issuedQuantity || 0) === borrowedQuantity;
+      const returned = Boolean(line.returnedDate) || returnedQuantity >= borrowedQuantity || legacyReturned;
+      const returnedDate = line.returnedDate || (legacyReturned ? item.returnedDate : "");
+      return {
+        returned,
+        returnedDate,
+        returnedQuantity: returned ? borrowedQuantity : returnedQuantity,
+        outstandingQuantity: returned ? 0 : Math.max(0, borrowedQuantity - returnedQuantity),
+        label: returned ? `Returned${returnedDate ? ` ${returnedDate}` : ""}` : "Pending Return"
+      };
     }
 
     function renderIssuanceHistoryTable() {
       const rows = issuanceHistoryRows();
       $("inventoryTable").closest("table").classList.remove("inventory-count-table");
       $("inventoryHead").innerHTML = `<tr><th>Actions</th><th>Date</th><th>Item</th><th>SKU</th><th>Issued / Borrowed Qty</th><th>Unit</th><th>Unit Cost</th><th>Total Cost</th><th>From Location</th><th>Jobsite</th><th>Requested By</th><th>Approved By</th><th>Signer</th><th>Company</th><th>PO #</th><th>Return Date</th><th>Return Status</th><th>Current Inventory Balance</th></tr>`;
-      $("inventoryTable").innerHTML = rows.map(({ request, line, item }) => {
+      $("inventoryTable").innerHTML = rows.map(({ request, line, lineIndex, item }) => {
         const unitCost = requestLineCost(line);
         const totalCost = unitCost === null ? null : unitCost * Number(line.quantity || 0);
+        const returnState = request.requestType === "Borrowed" ? borrowedLineReturnState(request, line, item) : null;
+        const returnButton = returnState && !returnState.returned && returnState.outstandingQuantity > 0
+          ? `<button class="primary action-btn borrow" onclick="returnBorrowedRequestLine('${request.id}', ${lineIndex})">Return</button>`
+          : "";
         return `<tr>
-        <td><button class="action-btn" onclick="openRequest('${request.id}')">Open Request</button></td>
+        <td><div class="toolbar"><button class="action-btn" onclick="openRequest('${request.id}')">Open Request</button>${returnButton}</div></td>
         <td>${escapeHtml(request.requestDate || "")}</td><td><strong>${escapeHtml(line.itemName || item?.name || "")}</strong></td><td>${escapeHtml(line.sku || item?.sku || "")}</td>
         <td class="number"><strong>${Number(line.quantity || 0)}</strong></td><td>${escapeHtml(line.unit || item?.unit || "")}</td>
         <td class="number">${unitCost === null ? "N/A" : formatMoney(unitCost)}</td><td class="number"><strong>${totalCost === null ? "N/A" : formatMoney(totalCost)}</strong></td><td>${escapeHtml(line.locationName || "")}</td>
         <td>${escapeHtml(request.jobsite || "")}</td><td>${escapeHtml(request.requestedBy || "")}</td><td>${escapeHtml(request.approvedBy || "")}</td><td>${escapeHtml(request.signatureName || "")}</td>
         <td>${escapeHtml(request.company || "")}</td><td>${escapeHtml(request.poNumber || "")}</td><td>${escapeHtml(request.returnDate || "")}</td>
-        <td>${escapeHtml(request.requestType === "Borrowed" ? (item?.returnedDate ? `Returned ${item.returnedDate}` : "Pending Return") : "Not Returnable")}</td>
+        <td>${escapeHtml(returnState ? returnState.label : "Not Returnable")}</td>
         <td class="number">${item ? `${Number(item.quantity || 0)} ${escapeHtml(item.unit || "")}` : "Item unavailable"}</td>
       </tr>`;
       }).join("") || `<tr><td colspan="18" class="empty">No approved ${state.quickFilter === "borrowed" ? "borrowing" : "issuance"} records found.</td></tr>`;
@@ -4862,6 +4886,11 @@
         const fifo = deductStockFifo(item, qty);
         if (!fifo.ok) return;
         const issuedFrom = fifo.deductions.map(row => `${row.location || "No location"}${row.bin ? ` / ${row.bin}` : ""}: ${row.quantity} ${item.unit || ""}`).join("; ");
+        line.issuedDeductions = fifo.deductions.map(row => ({ ...row }));
+        line.issuedFrom = issuedFrom;
+        line.returnedQuantity = 0;
+        line.returnedDate = "";
+        line.returnStatus = request.requestType === "Borrowed" ? "Pending Return" : "Not Returnable";
         item.issueType = request.requestType;
         item.issuedDate = request.requestDate;
         item.issuePurpose = request.jobsite;
@@ -5149,6 +5178,70 @@
       item.movements.push({ amount: qty, reason: `Returned borrowed quantity from ${item.issuedTo || "borrower"}`, date: new Date().toISOString() });
       saveItems({ sync: false });
       await pushAtomicInventoryChange(item, qty, `Returned borrowed quantity from ${item.issuedTo || "borrower"}`, item.issuedFrom || item.location || "");
+    }
+
+    async function returnBorrowedRequestLine(requestId, lineIndex) {
+      const request = state.requests.find(record => record.id === requestId);
+      const lines = request ? requestLines(request) : [];
+      const line = lines[Number(lineIndex)];
+      const item = line ? state.items.find(record => record.id === line.itemId) : null;
+      if (!request || request.requestType !== "Borrowed" || request.status !== "Approved" || !line || !item) {
+        alert("This borrowed item could not be found. Refresh the page and try again.");
+        return;
+      }
+      const returnState = borrowedLineReturnState(request, line, item);
+      if (returnState.returned || returnState.outstandingQuantity <= 0) {
+        alert("This borrowed item has already been returned.");
+        render();
+        return;
+      }
+      const qty = returnState.outstandingQuantity;
+      if (!confirm(`Return ${qty} ${line.unit || item.unit || "unit"} of ${line.itemName || item.name} to inventory?`)) return;
+
+      const savedDeductions = Array.isArray(line.issuedDeductions) && line.issuedDeductions.length
+        ? line.issuedDeductions
+        : (String(item.issuePoNumber || "") === String(request.poNumber || "") && Number(item.issuedQuantity || 0) === Number(line.quantity || 0)
+          ? item.issuedDeductions
+          : null);
+      if (Array.isArray(savedDeductions) && savedDeductions.length) {
+        restoreStockDeductions(item, savedDeductions);
+      } else {
+        adjustStockLocation(item, line.locationId || item.issuedLocationId || "", qty);
+      }
+
+      const returnedAt = todayIso();
+      line.returnedQuantity = Number(line.quantity || 0);
+      line.returnedDate = returnedAt;
+      line.returnStatus = "Returned";
+      request.updatedAt = new Date().toISOString();
+      item.updatedAt = request.updatedAt;
+      item.movements ||= [];
+      const reason = `Returned borrowed request ${requestDocumentNumber(request)} from ${request.requestedBy || "borrower"}`;
+      item.movements.push({ amount: qty, reason, location: line.issuedFrom || line.locationName || item.location || "", referenceNumber: request.id, date: request.updatedAt });
+
+      const otherOutstanding = state.requests.some(otherRequest => otherRequest.status === "Approved" && otherRequest.requestType === "Borrowed"
+        && requestLines(otherRequest).some((otherLine, otherIndex) => otherLine.itemId === item.id
+          && !(otherRequest.id === request.id && otherIndex === Number(lineIndex))
+          && !borrowedLineReturnState(otherRequest, otherLine, item).returned));
+      if (!otherOutstanding) {
+        item.returnedDate = returnedAt;
+        item.returnStatus = "Returned";
+        item.issueType = "Returned";
+      }
+
+      saveItems({ sync: false });
+      saveRequests({ sync: false });
+      render();
+      try {
+        await pushAtomicInventoryChange(item, qty, reason, line.issuedFrom || line.locationName || item.location || "", request.id, { silent: true });
+        await pushRequestChangeToSupabase(request);
+        await refreshRequestsRegister();
+        render();
+      } catch (error) {
+        $("syncStatus").textContent = "Return saved on this device only";
+        $("syncDetail").textContent = error.message;
+        alert(`The return is saved on this device, but online sync failed: ${error.message}`);
+      }
     }
 
     function renderPhotoPreview() {
