@@ -94,6 +94,9 @@
       text-transform: uppercase;
     }
 
+    .checkbox-label > span:last-child { display: flex; align-items: center; gap: 8px; min-height: 38px; color: var(--ink); text-transform: none; }
+    .checkbox-label input[type="checkbox"] { width: auto; min-height: 0; }
+
     .app {
       min-height: 100vh;
       display: grid;
@@ -868,8 +871,15 @@
     }
 
     .modal-head h2 { margin: 0; font-size: 18px; }
+    .modal-head-actions { display: flex; align-items: center; gap: 8px; }
     .modal-body { padding: 18px; display: grid; gap: 16px; }
     .modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    #requestModal .modal.request-modal-maximized {
+      width: calc(100vw - 24px);
+      height: calc(100vh - 24px);
+      max-height: calc(100vh - 24px);
+    }
+    #requestPoDropZone.po-not-applicable { opacity: .58; background: #f1f4f1; }
     .parts-report-pdf-controls { display: flex; align-items: end; justify-content: flex-end; gap: 10px; flex-wrap: wrap; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f7faf7; }
     .parts-report-pdf-controls label { min-width: 150px; margin: 0; }
     .parts-report-pdf-controls button { min-height: 42px; }
@@ -1525,7 +1535,10 @@
     <form class="modal" id="requestForm">
       <div class="modal-head">
         <h2 id="requestModalTitle">New Request</h2>
-        <button type="button" class="icon-btn" id="closeRequestModalBtn" title="Close">X</button>
+        <div class="modal-head-actions">
+          <button type="button" id="maximizeRequestModalBtn">Maximize</button>
+          <button type="button" class="icon-btn" id="closeRequestModalBtn" title="Close">X</button>
+        </div>
       </div>
       <div class="modal-body">
         <input type="hidden" id="requestId">
@@ -1550,6 +1563,7 @@
           <label>Name<input id="requestSignatureName" placeholder="Printed signer name"></label>
           <label>Return Date<input id="requestReturnDate" type="date"></label>
           <label>PO #<input id="requestPoNumber" required placeholder="PO number"></label>
+          <label class="checkbox-label"><span>PO Requirement</span><span><input id="requestPoNotApplicable" type="checkbox"> PO is N/A</span></label>
           <label>Company<input id="requestCompany" placeholder="Company name"></label>
           <label class="span-2 file-drop-zone" id="requestPoDropZone">PO Upload
             <input id="requestPoUpload" type="file" required accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx">
@@ -4161,19 +4175,22 @@
       $("requestPoFileData").value = request?.poFileData || "";
       $("requestPoFileName").value = request?.poFileName || "";
       $("requestPoFileType").value = request?.poFileType || "";
-      $("requestPoFileLabel").textContent = request?.poFileName ? `Attached: ${request.poFileName}` : "Required: click or drag PDF, JPEG/image, Word, or Excel PO here.";
-      $("requestPoUpload").required = !request?.poFileData;
       $("requestReturnDate").value = request?.returnDate || "";
       $("requestPoNumber").value = request?.poNumber || "";
+      $("requestPoNumber").dataset.previousValue = /^n\/?a$/i.test(request?.poNumber || "") ? "" : (request?.poNumber || "");
+      $("requestPoNotApplicable").checked = request?.poNotApplicable === true || /^n\/?a$/i.test(request?.poNumber || "");
       $("requestCompany").value = request?.company || "";
       $("requestNotes").value = request?.notes || "";
       renderRequestItemLines(request ? requestLines(request) : [{ itemId: selectedId, quantity: 1 }]);
       renderRequestPhotoPreview();
       updateBorrowedReturnRequirement();
+      updateRequestPoRequirement();
       $("deleteRequestBtn").classList.toggle("hidden", !request);
       $("printIssuanceFormBtn").classList.toggle("hidden", !request);
       document.body.classList.add("modal-open");
       $("requestModal").classList.add("open");
+      $("requestForm").classList.remove("request-modal-maximized");
+      $("maximizeRequestModalBtn").textContent = "Maximize";
       loadSignaturePad("requestSignatureCanvas", "requestSignatureData", request?.signatureData || "");
     }
 
@@ -4187,8 +4204,14 @@
       $("requestPoFileData").value = "";
       $("requestPoFileName").value = "";
       $("requestPoFileType").value = "";
+      $("requestPoNotApplicable").checked = false;
+      $("requestPoNumber").dataset.previousValue = "";
       $("requestPoFileLabel").textContent = "Required: click or drag PDF, JPEG/image, Word, or Excel PO here.";
       $("requestPoUpload").required = true;
+      $("requestPoUpload").disabled = false;
+      $("requestPoDropZone").classList.remove("po-not-applicable");
+      $("requestForm").classList.remove("request-modal-maximized");
+      $("maximizeRequestModalBtn").textContent = "Maximize";
       renderRequestPhotoPreview();
       clearSignaturePad("requestSignatureCanvas", "requestSignatureData");
     }
@@ -4204,6 +4227,31 @@
         locationId: request.locationId || "",
         locationName: request.locationName || ""
       }].filter(line => line.itemId);
+    }
+
+    function updateRequestPoRequirement() {
+      const notApplicable = $("requestPoNotApplicable").checked;
+      const numberInput = $("requestPoNumber");
+      const uploadInput = $("requestPoUpload");
+      if (notApplicable) {
+        if (numberInput.value.trim() && !/^n\/?a$/i.test(numberInput.value.trim())) numberInput.dataset.previousValue = numberInput.value.trim();
+        numberInput.value = "N/A";
+      } else if (/^n\/?a$/i.test(numberInput.value.trim())) {
+        numberInput.value = numberInput.dataset.previousValue || "";
+      }
+      numberInput.readOnly = notApplicable;
+      numberInput.required = !notApplicable;
+      uploadInput.disabled = notApplicable;
+      uploadInput.required = !notApplicable && !$("requestPoFileData").value;
+      $("requestPoDropZone").classList.toggle("po-not-applicable", notApplicable);
+      $("requestPoFileLabel").textContent = notApplicable
+        ? "PO is marked N/A; no PO number or upload is required."
+        : ($("requestPoFileName").value ? `Attached: ${$("requestPoFileName").value}` : "Required: click or drag PDF, JPEG/image, Word, or Excel PO here.");
+    }
+
+    function toggleRequestModalMaximize() {
+      const maximized = $("requestForm").classList.toggle("request-modal-maximized");
+      $("maximizeRequestModalBtn").textContent = maximized ? "Restore" : "Maximize";
     }
 
     function requestItemLabel(item) {
@@ -4772,12 +4820,13 @@
         $("requestReturnDate").focus();
         return;
       }
-      if (!$("requestPoNumber").value.trim()) {
+      const poNotApplicable = $("requestPoNotApplicable").checked;
+      if (!poNotApplicable && !$("requestPoNumber").value.trim()) {
         alert("PO # is required.");
         $("requestPoNumber").focus();
         return;
       }
-      if (!$("requestPoFileData").value) {
+      if (!poNotApplicable && !$("requestPoFileData").value) {
         alert("PO upload is required. Please attach the PO PDF, image, Word, or Excel file.");
         $("requestPoUpload").focus();
         return;
@@ -4809,7 +4858,8 @@
         poFileName: $("requestPoFileName").value,
         poFileType: $("requestPoFileType").value,
         returnDate: $("requestReturnDate").value,
-        poNumber: $("requestPoNumber").value.trim(),
+        poNumber: poNotApplicable ? "N/A" : $("requestPoNumber").value.trim(),
+        poNotApplicable,
         quantity: Number(firstLine.quantity || 0),
         unit: firstLine.unit || "",
         company: $("requestCompany").value.trim(),
@@ -6398,7 +6448,7 @@
     $("addStockLocationBtn").addEventListener("click", addStockLocation);
     $("stockLocationsList").addEventListener("input", updateQuantityFromStockLocations);
     $("closeRequestModalBtn").addEventListener("click", closeRequestModal);
-    $("requestModal").addEventListener("click", event => { if (event.target.id === "requestModal") closeRequestModal(); });
+    $("maximizeRequestModalBtn").addEventListener("click", toggleRequestModalMaximize);
     $("requestForm").addEventListener("submit", saveRequest);
     $("requestItemsList").addEventListener("change", handleRequestItemsChange);
     $("requestItemsList").addEventListener("input", handleRequestItemsChange);
@@ -6417,6 +6467,7 @@
     $("requestPhotoUpload").addEventListener("change", event => handleRequestPhotoUpload(event.target.files[0]));
     $("requestPhotoCameraUpload").addEventListener("change", event => handleRequestPhotoUpload(event.target.files[0]));
     $("requestPoUpload").addEventListener("change", event => handleRequestPoUpload(event.target.files[0]));
+    $("requestPoNotApplicable").addEventListener("change", updateRequestPoRequirement);
     $("addRequestItemBtn").addEventListener("click", () => addRequestLine());
     $("clearRequestSignatureBtn").addEventListener("click", () => clearSignaturePad("requestSignatureCanvas", "requestSignatureData"));
     $("deleteRequestBtn").addEventListener("click", deleteRequest);
