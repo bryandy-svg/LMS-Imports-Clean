@@ -3229,7 +3229,7 @@
     function renderIssuanceHistoryTable() {
       const rows = issuanceHistoryRows();
       $("inventoryTable").closest("table").classList.remove("inventory-count-table");
-      $("inventoryHead").innerHTML = `<tr><th>Actions</th><th>Date</th><th>Item</th><th>SKU</th><th>Issued / Borrowed Qty</th><th>Unit</th><th>Unit Cost</th><th>Total Cost</th><th>From Location</th><th>Jobsite</th><th>Requested By</th><th>Approved By</th><th>Signer</th><th>Company</th><th>PO #</th><th>Return Date</th><th>Return Status</th><th>Current Inventory Balance</th></tr>`;
+      $("inventoryHead").innerHTML = `<tr><th>Actions</th><th>Date</th><th>Item</th><th>SKU</th><th>Issued / Borrowed Qty</th><th>Unit</th><th>Unit Cost</th><th>Total Cost</th><th>From Location</th><th>Jobsite</th><th>Requested By</th><th>Approved By</th><th>Signer</th><th>Company</th><th>PO #</th><th>Scheduled Return Date</th><th>Actual Return Date</th><th>Return Status</th><th>Current Inventory Balance</th></tr>`;
       $("inventoryTable").innerHTML = rows.map(({ request, line, lineIndex, item }) => {
         const unitCost = requestLineCost(line);
         const totalCost = unitCost === null ? null : unitCost * Number(line.quantity || 0);
@@ -3243,11 +3243,11 @@
         <td class="number"><strong>${Number(line.quantity || 0)}</strong></td><td>${escapeHtml(line.unit || item?.unit || "")}</td>
         <td class="number">${unitCost === null ? "N/A" : formatMoney(unitCost)}</td><td class="number"><strong>${totalCost === null ? "N/A" : formatMoney(totalCost)}</strong></td><td>${escapeHtml(line.locationName || "")}</td>
         <td>${escapeHtml(request.jobsite || "")}</td><td>${escapeHtml(request.requestedBy || "")}</td><td>${escapeHtml(request.approvedBy || "")}</td><td>${escapeHtml(request.signatureName || "")}</td>
-        <td>${escapeHtml(request.company || "")}</td><td>${escapeHtml(request.poNumber || "")}</td><td>${escapeHtml(request.returnDate || "")}</td>
+        <td>${escapeHtml(request.company || "")}</td><td>${escapeHtml(request.poNumber || "")}</td><td>${escapeHtml(request.returnDate || "")}</td><td>${escapeHtml(returnState?.returnedDate || "")}</td>
         <td>${escapeHtml(returnState ? returnState.label : "Not Returnable")}</td>
         <td class="number">${item ? `${Number(item.quantity || 0)} ${escapeHtml(item.unit || "")}` : "Item unavailable"}</td>
       </tr>`;
-      }).join("") || `<tr><td colspan="18" class="empty">No approved ${state.quickFilter === "borrowed" ? "borrowing" : "issuance"} records found.</td></tr>`;
+      }).join("") || `<tr><td colspan="19" class="empty">No approved ${state.quickFilter === "borrowed" ? "borrowing" : "issuance"} records found.</td></tr>`;
     }
 
     function renderInventoryCountTable(items) {
@@ -5196,7 +5196,14 @@
         return;
       }
       const qty = returnState.outstandingQuantity;
-      if (!confirm(`Return ${qty} ${line.unit || item.unit || "unit"} of ${line.itemName || item.name} to inventory?`)) return;
+      const actualReturnDate = prompt("Enter the actual return date (YYYY-MM-DD).", todayIso());
+      if (actualReturnDate === null) return;
+      const cleanReturnDate = actualReturnDate.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanReturnDate) || Number.isNaN(new Date(`${cleanReturnDate}T00:00:00`).getTime())) {
+        alert("Enter a valid actual return date in YYYY-MM-DD format.");
+        return;
+      }
+      if (!confirm(`Return ${qty} ${line.unit || item.unit || "unit"} of ${line.itemName || item.name} on ${cleanReturnDate}?`)) return;
 
       const savedDeductions = Array.isArray(line.issuedDeductions) && line.issuedDeductions.length
         ? line.issuedDeductions
@@ -5209,7 +5216,7 @@
         adjustStockLocation(item, line.locationId || item.issuedLocationId || "", qty);
       }
 
-      const returnedAt = todayIso();
+      const returnedAt = cleanReturnDate;
       line.returnedQuantity = Number(line.quantity || 0);
       line.returnedDate = returnedAt;
       line.returnStatus = "Returned";
