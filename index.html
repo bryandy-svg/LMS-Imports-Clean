@@ -334,6 +334,8 @@
       min-width: 176px;
     }
 
+    .inventory-action-menu { width: 138px; min-height: 34px; padding: 5px 28px 5px 9px; font-weight: 700; }
+
     .icon-btn {
       width: 34px;
       min-height: 32px;
@@ -3323,17 +3325,35 @@
       { id: "receivedDate", label: "Received Date", sort: "receivedDate", exportLabel: "Received Date", exportValue: item => item.receivedDate, render: item => escapeHtml(item.receivedDate || "") },
       { id: "expiryDate", label: "Expiry Date", sort: "expiryDate", exportLabel: "Expiry Date", exportValue: item => item.expiryDate, render: item => escapeHtml(item.expiryDate || "") },
       { id: "notes", label: "Notes", exportLabel: "Notes", exportValue: item => item.notes, render: item => escapeHtml(item.notes || "") },
-      { id: "actions", label: "Actions", exportable: false, render: item => `<div class="row-actions">
-          <button class="action-btn" title="Edit" onclick="openItem('${item.id}')">Edit</button>
-          <button class="action-btn" title="Add stock to this item" onclick="adjustInventoryQuantity('${item.id}', 'add')">Add Inventory</button>
-          <button class="action-btn" title="Deduct stock from this item" onclick="adjustInventoryQuantity('${item.id}', 'deduct')">Deduct</button>
-          <button class="action-btn" title="Adjust stock by a positive or negative amount" onclick="adjustInventoryQuantity('${item.id}', 'adjust')">Adjust</button>
-          <button class="action-btn" title="Manage locations and quantities" onclick="openItemLocations('${item.id}')">Locations</button>
-          <button class="action-btn issue" title="Issue permanently" onclick="openIssueModal('${item.id}', 'Issued Permanently')">Issue</button>
-          <button class="action-btn borrow" title="Borrow with return date" onclick="openIssueModal('${item.id}', 'Borrowed')">Borrow</button>
-          ${item.issueType === "Borrowed" && !item.returnedDate ? `<button class="action-btn borrow" title="Return borrowed quantity" onclick="returnBorrowedItem('${item.id}')">Return</button>` : ""}
-        </div>` }
+      { id: "actions", label: "Actions", exportable: false, render: item => inventoryActionMenu(item) }
     ];
+
+    function inventoryActionMenu(item) {
+      return `<select class="inventory-action-menu" aria-label="Actions for ${escapeHtml(item.name || "inventory item")}" onchange="runInventoryAction(this, '${escapeHtml(item.id)}')">
+        <option value="" selected>Actions...</option>
+        <option value="edit">Edit</option>
+        <option value="add">Add Inventory</option>
+        <option value="deduct">Deduct</option>
+        <option value="adjust">Adjust</option>
+        <option value="locations">Locations</option>
+        <option value="issue">Issue</option>
+        <option value="borrow">Borrow</option>
+        ${item.issueType === "Borrowed" && !item.returnedDate ? `<option value="return">Return</option>` : ""}
+      </select>`;
+    }
+
+    function runInventoryAction(select, itemId) {
+      const action = select.value;
+      select.value = "";
+      if (action === "edit") openItem(itemId);
+      else if (action === "add") adjustInventoryQuantity(itemId, "add");
+      else if (action === "deduct") adjustInventoryQuantity(itemId, "deduct");
+      else if (action === "adjust") adjustInventoryQuantity(itemId, "adjust");
+      else if (action === "locations") openItemLocations(itemId);
+      else if (action === "issue") openIssueModal(itemId, "Issued Permanently");
+      else if (action === "borrow") openIssueModal(itemId, "Borrowed");
+      else if (action === "return") returnBorrowedItem(itemId);
+    }
 
     function activeInventoryColumns(showIssueColumns, includeActions = false) {
       const hidden = new Set(settings.hiddenColumns || []);
@@ -4020,16 +4040,7 @@
         <td>${returnLabel}<br><small class="muted">${returnMeta}</small></td>` : ""}
         <td>${formatMoney(totalValue(item))}<br><small class="muted">${formatMoney(item.unitCost || 0)} cost</small></td>
         <td><span class="pill ${st.cls}">${st.label}</span></td>
-        <td><div class="row-actions">
-          <button class="action-btn" title="Edit" onclick="openItem('${item.id}')">Edit</button>
-          <button class="action-btn" title="Add stock to this item" onclick="adjustInventoryQuantity('${item.id}', 'add')">Add Inventory</button>
-          <button class="action-btn" title="Deduct stock from this item" onclick="adjustInventoryQuantity('${item.id}', 'deduct')">Deduct</button>
-          <button class="action-btn" title="Adjust stock by a positive or negative amount" onclick="adjustInventoryQuantity('${item.id}', 'adjust')">Adjust</button>
-          <button class="action-btn" title="Manage locations and quantities" onclick="openItemLocations('${item.id}')">Locations</button>
-          <button class="action-btn issue" title="Issue permanently" onclick="openIssueModal('${item.id}', 'Issued Permanently')">Issue</button>
-          <button class="action-btn borrow" title="Borrow with return date" onclick="openIssueModal('${item.id}', 'Borrowed')">Borrow</button>
-          ${item.issueType === "Borrowed" && !item.returnedDate ? `<button class="action-btn borrow" title="Return borrowed quantity" onclick="returnBorrowedItem('${item.id}')">Return</button>` : ""}
-        </div></td>
+        <td>${inventoryActionMenu(item)}</td>
       </tr>`;
     }
 
@@ -5183,6 +5194,18 @@
       if (!item) return;
       const verb = mode === "add" ? "add" : mode === "deduct" ? "deduct" : "adjust by";
       const example = mode === "deduct" ? "1" : mode === "add" ? "1" : "-1 or 1";
+      let totalAmount = null;
+      if (mode === "add") {
+        const totalInput = prompt(`Enter the total purchase amount for the inventory being added to ${item.name}. Leave blank to keep the current unit cost.`, "");
+        if (totalInput === null) return;
+        if (totalInput.trim() !== "") {
+          totalAmount = Number(totalInput.replace(/[$,\s]/g, ""));
+          if (!Number.isFinite(totalAmount) || totalAmount < 0) {
+            alert("Enter a valid total purchase amount.");
+            return;
+          }
+        }
+      }
       const input = prompt(`Enter quantity to ${verb} for ${item.name}.`, example);
       if (input === null) return;
       const qty = Number(input);
@@ -5198,12 +5221,27 @@
       if (binName === null) return;
       const defaultReason = mode === "add" ? "Added inventory" : mode === "deduct" ? "Deducted inventory" : "Manual inventory adjustment";
       const reason = prompt("Reason", defaultReason) || defaultReason;
+      if (mode === "add" && totalAmount !== null) {
+        item.unitCost = Number((totalAmount / Math.abs(qty)).toFixed(4));
+        item.costUnavailable = false;
+      }
       const row = adjustStockLocationByName(item, locationName, binName, amount);
       item.updatedAt = new Date().toISOString();
       item.movements ||= [];
-      item.movements.push({ amount, reason, location: [row.location, row.bin].filter(Boolean).join(" / "), date: new Date().toISOString() });
+      item.movements.push({
+        amount,
+        reason,
+        location: [row.location, row.bin].filter(Boolean).join(" / "),
+        totalAmount: mode === "add" ? totalAmount : null,
+        unitCost: mode === "add" && totalAmount !== null ? item.unitCost : null,
+        date: new Date().toISOString()
+      });
       saveItems({ sync: false });
       await pushAtomicInventoryChange(item, amount, reason, [row.location, row.bin].filter(Boolean).join(" / "));
+      if (mode === "add" && totalAmount !== null) {
+        $("syncStatus").textContent = "Inventory and cost updated";
+        $("syncDetail").textContent = `${Math.abs(qty)} ${item.unit || "unit"} added for ${formatMoney(totalAmount)} total; unit cost is ${formatMoney(item.unitCost)}.`;
+      }
     }
 
     async function returnBorrowedItem(id) {
