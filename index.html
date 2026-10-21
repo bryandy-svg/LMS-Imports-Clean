@@ -966,6 +966,17 @@
     .access-checkboxes { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 8px; }
     .access-checkboxes label { display: flex; align-items: center; gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; text-transform: none; }
     .access-checkboxes input { width: auto; min-height: auto; }
+
+    .create-user-card { max-width: 940px; margin: 0 auto; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: #fbfcfa; }
+    .create-user-heading { margin-bottom: 16px; }
+    .create-user-heading h3 { margin: 0 0 4px; }
+    .create-user-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: end; }
+    .permission-picker { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; background: white; }
+    .permission-picker summary { cursor: pointer; padding: 12px 14px; font-weight: 800; color: var(--green); }
+    .permission-picker summary span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; font-weight: 500; }
+    .permission-picker .access-checkboxes { padding: 0 12px 12px; }
+    .create-user-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+    body.inventory-view-only [data-inventory-mode="count"] { display: none !important; }
     .user-list { display: grid; gap: 10px; }
     .user-row { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfcfa; }
     .user-row-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px; }
@@ -1051,6 +1062,8 @@
       }
       .span-2, .span-4 { grid-column: span 1; }
       .access-checkboxes { grid-template-columns: 1fr; }
+      .create-user-grid { grid-template-columns: 1fr; }
+      .create-user-card { padding: 14px; }
       .nav { grid-template-columns: 1fr 1fr; }
     }
   </style>
@@ -1419,26 +1432,36 @@
           <section class="panel" id="userManagementPanel">
             <div class="panel-header"><h2>User Access</h2></div>
             <form class="panel-body" id="createUserForm">
-              <div class="form-grid">
-                <label class="span-2">Username or Email<input id="newUsername" required></label>
-                <label class="span-2">Temporary Password<input id="newUserPassword" type="password" minlength="8" required></label>
+              <div class="create-user-card">
+                <div class="create-user-heading"><h3>Create User</h3><div class="muted">Create a login and choose a ready-made access level. Open custom permissions only when needed.</div></div>
+                <div class="create-user-grid">
+                  <label>Username or Email<input id="newUsername" autocomplete="off" required></label>
+                  <label>Temporary Password<input id="newUserPassword" type="password" minlength="8" autocomplete="new-password" required></label>
+                  <label>Access Level<select id="newUserPreset">
+                    <option value="inventory_view">Inventory View Only</option>
+                    <option value="inventory_staff">Inventory Staff</option>
+                    <option value="request_user">Request User</option>
+                    <option value="administrator">Administrator</option>
+                    <option value="custom">Custom</option>
+                  </select></label>
+                </div>
+                <details class="permission-picker">
+                  <summary>Custom Permissions <span id="newUserAccessSummary">Inventory - View Only</span></summary>
+                  <div class="access-checkboxes" id="newUserAccess">
+                    <label><input type="checkbox" value="dashboard"> Dashboard</label>
+                    <label><input type="checkbox" value="inventory"> Inventory - Full Access</label>
+                    <label><input type="checkbox" value="inventory_view"> Inventory - View Only</label>
+                    <label><input type="checkbox" value="issued"> Issued</label>
+                    <label><input type="checkbox" value="borrowed"> Borrowed</label>
+                    <label><input type="checkbox" value="requests"> Requests</label>
+                    <label><input type="checkbox" value="greenwaste"> Piti Greenwaste Tickets</label>
+                    <label><input type="checkbox" value="alerts"> Alerts</label>
+                    <label><input type="checkbox" value="settings"> Settings</label>
+                    <label><input type="checkbox" value="manage_users"> Create and Assign Users</label>
+                  </div>
+                </details>
+                <div class="create-user-footer"><div class="muted" id="createUserStatus"></div><button class="primary" type="submit">Create User</button></div>
               </div>
-              <h3>Check every section this user may access</h3>
-              <div class="access-checkboxes" id="newUserAccess">
-                <label><input type="checkbox" value="dashboard"> Dashboard</label>
-                <label><input type="checkbox" value="inventory"> Inventory</label>
-                <label><input type="checkbox" value="issued"> Issued</label>
-                <label><input type="checkbox" value="borrowed"> Borrowed</label>
-                <label><input type="checkbox" value="requests"> Requests</label>
-                <label><input type="checkbox" value="greenwaste"> Piti Greenwaste Tickets</label>
-                <label><input type="checkbox" value="alerts"> Alerts</label>
-                <label><input type="checkbox" value="settings"> Settings</label>
-                <label><input type="checkbox" value="manage_users"> Create and Assign Users</label>
-              </div>
-              <div class="modal-actions">
-                <button class="primary" type="submit">Create User</button>
-              </div>
-              <div class="muted" id="createUserStatus"></div>
             </form>
             <div class="panel-body" style="border-top:1px solid var(--line)">
               <div class="panel-header" style="padding:0 0 12px;border:0">
@@ -3200,7 +3223,7 @@
       } else if (state.inventoryMode === "count") {
         renderInventoryCountTable(rows);
       } else {
-        const visibleColumns = activeInventoryColumns(showIssueColumns, true);
+        const visibleColumns = activeInventoryColumns(showIssueColumns, window.inventoryAccessMode !== "view");
         $("inventoryHead").innerHTML = inventoryHeader(visibleColumns);
         $("inventoryTable").innerHTML = rows.length ? rows.map(item => itemRow(item, visibleColumns, showIssueColumns)).join("") : `<tr><td colspan="${visibleColumns.length}" class="empty">No inventory matches the current view.</td></tr>`;
         renderColumnChooser(showIssueColumns);
@@ -3343,6 +3366,11 @@
     }
 
     function runInventoryAction(select, itemId) {
+      if (window.inventoryAccessMode === "view") {
+        select.value = "";
+        alert("This account has inventory viewing access only.");
+        return;
+      }
       const action = select.value;
       select.value = "";
       if (action === "edit") openItem(itemId);
@@ -6158,17 +6186,20 @@
         isPullingFromSupabase = true;
         const client = await getSupabase();
         const useIncremental = Boolean(options.incremental && (state.items.length || state.requests.length || state.greenwasteTickets.length));
-        let itemQuery = client.from(settings.supabaseTable).select("payload,updated_at").order("updated_at", { ascending: false });
-        let requestQuery = client.from(settings.requestTable).select("payload,updated_at").order("updated_at", { ascending: false });
-        let greenwasteQuery = client.from(settings.greenwasteTable || "greenwaste_tickets").select("payload,updated_at").order("updated_at", { ascending: false });
+        const mayReadInventory = window.appHasAccess?.("inventory") || window.appHasAccess?.("requests");
+        const mayReadRequests = window.appHasAccess?.("requests") || window.appHasAccess?.("issued") || window.appHasAccess?.("borrowed");
+        const mayReadGreenwaste = window.appHasAccess?.("greenwaste");
+        let itemQuery = mayReadInventory ? client.from(settings.supabaseTable).select("payload,updated_at").order("updated_at", { ascending: false }) : Promise.resolve({ data: [], error: null });
+        let requestQuery = mayReadRequests ? client.from(settings.requestTable).select("payload,updated_at").order("updated_at", { ascending: false }) : Promise.resolve({ data: [], error: null });
+        let greenwasteQuery = mayReadGreenwaste ? client.from(settings.greenwasteTable || "greenwaste_tickets").select("payload,updated_at").order("updated_at", { ascending: false }) : Promise.resolve({ data: [], error: null });
         if (useIncremental) {
           const itemCursor = cursorIso(itemSyncCursorKey, state.items);
           const greenwasteCursor = cursorIso(greenwasteSyncCursorKey, state.greenwasteTickets);
-          if (itemCursor) itemQuery = itemQuery.gt("updated_at", itemCursor);
+          if (itemCursor && mayReadInventory) itemQuery = itemQuery.gt("updated_at", itemCursor);
           // Requests share their table with system settings. A settings update can
           // move the shared cursor beyond a valid phone request, so requests use
           // a small full refresh while the larger data sets stay incremental.
-          if (greenwasteCursor) greenwasteQuery = greenwasteQuery.gt("updated_at", greenwasteCursor);
+          if (greenwasteCursor && mayReadGreenwaste) greenwasteQuery = greenwasteQuery.gt("updated_at", greenwasteCursor);
         }
         const [itemResult, requestResult, greenwasteResult] = await Promise.all([
           itemQuery,
@@ -6281,13 +6312,19 @@
     async function loadSupabaseOnStart() {
       if (!settings.supabaseUrl || !settings.supabaseKey) return;
       settings.syncMode = "supabase";
-      startAutoSupabasePull();
-      await startInventoryRealtime();
+      if (window.appHasAccess?.("inventory")) {
+        startAutoSupabasePull();
+        await startInventoryRealtime();
+      }
       await pullSupabase({ silent: true, merge: true, auto: true, incremental: state.items.length > 0 || state.requests.length > 0 || state.greenwasteTickets.length > 0 });
-      await refreshChangedInventoryItems({ silent: true });
-      await loadGreenwasteCustomersFromSupabase();
-      await loadGreenwasteRatesFromSupabase();
-      await restoreCachedPhotos();
+      if (window.appHasAccess?.("inventory")) {
+        await refreshChangedInventoryItems({ silent: true });
+        await restoreCachedPhotos();
+      }
+      if (window.appHasAccess?.("greenwaste")) {
+        await loadGreenwasteCustomersFromSupabase();
+        await loadGreenwasteRatesFromSupabase();
+      }
     }
 
     async function testSupabase() {

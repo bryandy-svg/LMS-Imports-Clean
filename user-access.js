@@ -1,8 +1,8 @@
 (() => {
   const bootstrapAdmin = "bryan.dy@lmsfm.com";
-  const allAccess = ["dashboard", "inventory", "issued", "borrowed", "requests", "greenwaste", "alerts", "settings", "manage_users"];
+  const allAccess = ["dashboard", "inventory", "inventory_view", "issued", "borrowed", "requests", "greenwaste", "alerts", "settings", "manage_users"];
   const accessLabels = {
-    dashboard: "Dashboard", inventory: "Inventory", issued: "Issued", borrowed: "Borrowed",
+    dashboard: "Dashboard", inventory: "Inventory - Full Access", inventory_view: "Inventory - View Only", issued: "Issued", borrowed: "Borrowed",
     requests: "Requests", greenwaste: "Piti Greenwaste Tickets", alerts: "Alerts",
     settings: "Settings", manage_users: "Create and Assign Users"
   };
@@ -18,6 +18,15 @@
     return currentAccess.includes(permission);
   }
 
+  function canViewInventory() {
+    return can("inventory") || can("inventory_view");
+  }
+
+  function normalizeAccess(access) {
+    const unique = [...new Set((access || []).filter(permission => allAccess.includes(permission)))];
+    return unique.includes("inventory") ? unique.filter(permission => permission !== "inventory_view") : unique;
+  }
+
   function setVisible(selector, visible) {
     document.querySelectorAll(selector).forEach(element => {
       element.hidden = !visible;
@@ -26,9 +35,13 @@
 
   function applyAccess(user, storedAccess = null) {
     const email = String(user?.email || "").toLowerCase();
-    currentAccess = email === bootstrapAdmin ? allAccess : (storedAccess || user?.app_metadata?.access || []);
+    currentAccess = email === bootstrapAdmin ? allAccess : normalizeAccess(storedAccess || user?.app_metadata?.access || []);
+    const inventoryReadOnly = can("inventory_view") && !can("inventory");
+    document.body.classList.toggle("inventory-view-only", inventoryReadOnly);
+    window.inventoryAccessMode = inventoryReadOnly ? "view" : (can("inventory") ? "edit" : "none");
+    window.appHasAccess = permission => permission === "inventory" ? canViewInventory() : can(permission);
     setVisible('[data-view-button="dashboard"]', can("dashboard"));
-    setVisible('[data-view-button="inventory"]', can("inventory"));
+    setVisible('[data-view-button="inventory"]', canViewInventory());
     setVisible('[data-nav-filter="permanent"]', can("issued"));
     setVisible('[data-nav-filter="borrowed"]', can("borrowed"));
     setVisible('[data-view-button="requests"]', can("requests"));
@@ -37,19 +50,23 @@
     setVisible('[data-view-button="settings"]', can("settings"));
     $("userManagementPanel").hidden = !can("manage_users");
 
-    setVisible("#addItemBtn, #importBtn, #exportCsvBtn, #exportJsonBtn, #invoicePdfBtn, #invoiceApprovalsBtn", can("inventory"));
+    setVisible("#addItemBtn, #importBtn, #invoicePdfBtn, #invoiceApprovalsBtn", can("inventory"));
+    setVisible("#exportCsvBtn, #exportJsonBtn", canViewInventory());
     setVisible("#addRequestBtn", can("requests"));
     setVisible("#mobileRequestBtn", can("requests"));
     setVisible("#mobileAddInventoryBtn, #mobilePdfApprovalsBtn", can("inventory"));
     setVisible("#mobileGreenwasteBtn", can("greenwaste"));
 
+    if (inventoryReadOnly) state.inventoryMode = "register";
     const viewPermission = state.view === "inventory" && state.quickFilter === "permanent"
       ? "issued"
       : state.view === "inventory" && state.quickFilter === "borrowed"
         ? "borrowed"
         : state.view;
-    if (!can(viewPermission)) {
-      state.view = allAccess.find(permission => permission !== "manage_users" && can(permission)) || "dashboard";
+    const viewAllowed = viewPermission === "inventory" ? canViewInventory() : can(viewPermission);
+    if (!viewAllowed) {
+      const firstPermission = allAccess.find(permission => permission !== "manage_users" && can(permission));
+      state.view = firstPermission === "inventory_view" ? "inventory" : (firstPermission || "dashboard");
       if (state.view === "issued" || state.view === "borrowed") {
         state.quickFilter = state.view === "issued" ? "permanent" : "borrowed";
         state.view = "inventory";
@@ -101,6 +118,8 @@
   async function signOut() {
     if (authClient) await authClient.auth.signOut();
     currentAccess = [];
+    window.inventoryAccessMode = "none";
+    window.appHasAccess = () => false;
     document.body.classList.remove("greenwaste-mobile", "request-only", "modal-open");
     document.body.classList.add("role-locked");
     $("loginStatus").textContent = "Signed out.";
@@ -109,7 +128,7 @@
   async function createUser(event) {
     event.preventDefault();
     if (!can("manage_users")) return;
-    const access = [...document.querySelectorAll('#newUserAccess input:checked')].map(input => input.value);
+    const access = normalizeAccess([...document.querySelectorAll('#newUserAccess input:checked')].map(input => input.value));
     if (!access.length) return $("createUserStatus").textContent = "Select at least one access checkbox.";
     $("createUserStatus").textContent = "Creating user...";
     try {
@@ -126,6 +145,7 @@
       if (data?.error) throw new Error(data.error);
       $("createUserStatus").textContent = `Created ${data.username}.`;
       event.target.reset();
+      applyNewUserPreset("inventory_view");
       await loadUsers();
     } catch (error) {
       $("createUserStatus").textContent = error.message;
@@ -144,6 +164,38 @@
     return allAccess.map(permission => `
       <label><input type="checkbox" value="${permission}" ${user.access.includes(permission) ? "checked" : ""}> ${accessLabels[permission]}</label>
     `).join("");
+  }
+
+  const accessPresets = {
+    inventory_view: ["inventory_view"],
+    inventory_staff: ["inventory", "issued", "borrowed", "requests", "alerts"],
+    request_user: ["inventory_view", "requests"],
+    administrator: allAccess.filter(permission => permission !== "inventory_view"),
+    custom: []
+  };
+
+  function updateAccessSummary() {
+    const selected = normalizeAccess([...document.querySelectorAll('#newUserAccess input:checked')].map(input => input.value));
+    const summary = $("newUserAccessSummary");
+    if (summary) summary.textContent = selected.length ? selected.map(permission => accessLabels[permission]).join(", ") : "No permissions selected";
+  }
+
+  function applyNewUserPreset(preset) {
+    const permissions = accessPresets[preset] || [];
+    document.querySelectorAll('#newUserAccess input').forEach(input => { input.checked = permissions.includes(input.value); });
+    if ($("newUserPreset")) $("newUserPreset").value = preset;
+    updateAccessSummary();
+  }
+
+  function handleAccessChoice(container, changedInput) {
+    if (!changedInput.checked) return;
+    if (changedInput.value === "inventory") container.querySelector('input[value="inventory_view"]')?.removeAttribute("checked");
+    if (changedInput.value === "inventory_view") container.querySelector('input[value="inventory"]')?.removeAttribute("checked");
+    const opposite = changedInput.value === "inventory" ? "inventory_view" : changedInput.value === "inventory_view" ? "inventory" : "";
+    if (opposite) {
+      const input = container.querySelector(`input[value="${opposite}"]`);
+      if (input) input.checked = false;
+    }
   }
 
   async function loadUsers() {
@@ -185,7 +237,7 @@
         return;
       }
       if (event.target.closest("[data-save-user]")) {
-        const access = [...row.querySelectorAll('.access-checkboxes input:checked')].map(input => input.value);
+        const access = normalizeAccess([...row.querySelectorAll('.access-checkboxes input:checked')].map(input => input.value));
         if (!access.length) throw new Error("Select at least one access checkbox.");
         const password = row.querySelector("[data-user-password]").value;
         status.textContent = "Saving changes...";
@@ -205,6 +257,18 @@
     $("createUserForm").addEventListener("submit", createUser);
     $("refreshUsersBtn").addEventListener("click", loadUsers);
     $("userList").addEventListener("click", handleUserListClick);
+    $("newUserPreset").addEventListener("change", event => applyNewUserPreset(event.target.value));
+    $("newUserAccess").addEventListener("change", event => {
+      if (!event.target.matches('input[type="checkbox"]')) return;
+      handleAccessChoice($("newUserAccess"), event.target);
+      $("newUserPreset").value = "custom";
+      updateAccessSummary();
+    });
+    $("userList").addEventListener("change", event => {
+      if (!event.target.matches('.access-checkboxes input[type="checkbox"]')) return;
+      handleAccessChoice(event.target.closest(".access-checkboxes"), event.target);
+    });
+    applyNewUserPreset("inventory_view");
     initializeAccess();
   });
 })();

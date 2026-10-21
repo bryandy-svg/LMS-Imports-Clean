@@ -181,7 +181,7 @@ drop policy if exists "Assigned users delete requests" on public.inventory_reque
 create policy "Assigned users read inventory" on public.inventory_items
 for select to authenticated using (
   lower(coalesce(auth.jwt()->>'email','')) = 'bryan.dy@lmsfm.com'
-  or coalesce(auth.jwt()->'app_metadata'->'access','[]'::jsonb) ?| array['inventory','requests','manage_users']
+  or coalesce(auth.jwt()->'app_metadata'->'access','[]'::jsonb) ?| array['inventory','inventory_view','requests','manage_users']
 );
 create policy "Assigned users insert inventory" on public.inventory_items
 for insert to authenticated with check (
@@ -237,7 +237,7 @@ create table if not exists public.user_access (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint user_access_values_check check (
-    access <@ array['dashboard','inventory','issued','borrowed','requests','greenwaste','alerts','settings','manage_users']::text[]
+    access <@ array['dashboard','inventory','inventory_view','issued','borrowed','requests','greenwaste','alerts','settings','manage_users']::text[]
   )
 );
 

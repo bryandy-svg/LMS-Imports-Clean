@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 const allowedAccess = new Set([
-  "dashboard", "inventory", "issued", "borrowed", "requests",
+  "dashboard", "inventory", "inventory_view", "issued", "borrowed", "requests",
   "greenwaste", "alerts", "settings", "manage_users"
 ]);
 const bootstrapAdmin = "bryan.dy@lmsfm.com";
