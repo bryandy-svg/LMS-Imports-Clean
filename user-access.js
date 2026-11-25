@@ -85,6 +85,9 @@
       && localStorage.getItem("pitiGreenwasteMobileActive.v1") === "true"
       && matchMedia("(max-width: 650px)").matches) {
       await openMobileGreenwaste();
+    } else if (localStorage.getItem("pitiGreenwasteMobileActive.v1") === "true" && !can("greenwaste")) {
+      localStorage.removeItem("pitiGreenwasteMobileActive.v1");
+      $("loginStatus").textContent = "This account does not have Piti Greenwaste access.";
     }
   }
 

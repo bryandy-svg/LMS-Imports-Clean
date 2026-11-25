@@ -1092,6 +1092,8 @@
       <div class="portal-actions">
         <button type="button" id="publicMobileRequestBtn">Mobile Request — No Login Required</button>
         <small class="muted">Submit an inventory request from a phone without entering a username or password.</small>
+        <button type="button" id="publicGreenwasteBtn">Piti Greenwaste Ticket</button>
+        <small class="muted">Sign in with an account that has Piti Greenwaste access.</small>
       </div>
       <div class="portal-actions" hidden>
         <button class="primary" id="adminAccessBtn">Admin</button>
@@ -1101,8 +1103,14 @@
   </section>
   <section class="mobile-portal" id="mobilePortal">
     <div class="portal-card">
+      <div>
+        <h2>LMS Mall Lot Inventory</h2>
+        <p class="muted">Choose what you want to open.</p>
+      </div>
       <div class="portal-actions">
-        <button class="primary" id="mobileRequestBtn">Request Items</button>
+        <button class="primary" id="mobileLoginBtn">Inventory Login / Change User</button>
+        <button id="mobilePublicRequestBtn">Material Request — No Login Required</button>
+        <button id="mobileRequestBtn">Signed-in Material Request</button>
         <button id="mobileAddInventoryBtn">Add Inventory</button>
         <button id="mobileGreenwasteBtn">Piti Greenwaste Ticket</button>
         <button id="mobilePdfApprovalsBtn">PDF Approvals</button>
@@ -4761,6 +4769,15 @@
       await openMobileRequest();
     }
 
+    function prepareGreenwasteLogin() {
+      localStorage.setItem("pitiGreenwasteMobileActive.v1", "true");
+      document.body.classList.remove("request-only");
+      document.body.classList.add("role-locked");
+      history.replaceState(null, "", location.pathname);
+      $("loginStatus").textContent = "Sign in to open the Piti Greenwaste Ticket.";
+      $("loginUsername").focus();
+    }
+
     function setupSignaturePad(canvasId, inputId) {
       const canvas = $(canvasId);
       if (!canvas) return;
@@ -6488,6 +6505,9 @@
     $("adminAccessBtn").addEventListener("click", enterAdminMode);
     $("requestorAccessBtn").addEventListener("click", enterRequestorMode);
     $("publicMobileRequestBtn").addEventListener("click", enterRequestorMode);
+    $("publicGreenwasteBtn").addEventListener("click", prepareGreenwasteLogin);
+    $("mobilePublicRequestBtn").addEventListener("click", enterRequestorMode);
+    $("mobileLoginBtn").addEventListener("click", () => $("logoutBtn").click());
     $("mobileRequestBtn").addEventListener("click", openMobileRequest);
     $("mobileAddInventoryBtn").addEventListener("click", openMobileAddInventory);
     $("mobileGreenwasteBtn").addEventListener("click", openMobileGreenwaste);
