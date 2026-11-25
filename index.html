@@ -6282,6 +6282,7 @@
         let restored = 0;
         for (let index = 0; index < missingIds.length; index += 10) {
           const ids = missingIds.slice(index, index + 10);
+          const batchRestored = [];
           if (!options.silent) {
             $("syncStatus").textContent = "Restoring photos";
             $("syncDetail").textContent = `Checking ${Math.min(index + ids.length, missingIds.length)} of ${missingIds.length} missing photo records.`;
@@ -6298,12 +6299,16 @@
             const item = state.items.find(record => record.id === row.id);
             if (item && !item.photoData) {
               item.photoData = row.photo_data;
+              batchRestored.push(item);
               restored += 1;
             }
           });
+          if (batchRestored.length) {
+            await cacheItemPhotos(batchRestored);
+            render();
+          }
         }
         if (restored) {
-          await cacheItemPhotos(state.items);
           saveItems({ sync: false });
           $("syncStatus").textContent = "Photos restored";
           $("syncDetail").textContent = `Restored ${restored} photo${restored === 1 ? "" : "s"} once, then saved them to the local photo cache.`;
@@ -6337,6 +6342,7 @@
       if (window.appHasAccess?.("inventory")) {
         await refreshChangedInventoryItems({ silent: true });
         await restoreCachedPhotos();
+        await restoreMissingPhotosFromSupabase({ silent: true });
       }
       if (window.appHasAccess?.("greenwaste")) {
         await loadGreenwasteCustomersFromSupabase();
